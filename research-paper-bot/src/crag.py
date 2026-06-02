@@ -11,6 +11,7 @@ This means when the indexed papers don't cover a question well, the bot falls
 back to a live web search instead of confidently answering from weak context.
 """
 
+import time
 from typing import List, TypedDict
 
 from langchain_core.documents import Document
@@ -68,51 +69,81 @@ class CRAGState(TypedDict):
     documents: List[Document]
     generation: str
     used_web_search: bool
+    trace: list           # step-by-step processing log (for transparency)
 
 
 def _grader():
     return GRADE_PROMPT | get_llm().with_structured_output(GradeDocuments)
 
 
+def _label(d: Document) -> dict:
+    """Compact, presentation-friendly reference to a chunk (for the trace)."""
+    return {
+        "title": config.display_title(d.metadata.get("source", ""), d.metadata.get("title", "Unknown")),
+        "page": d.metadata.get("page_number", "?"),
+        "web": d.metadata.get("origin") == "web_search",
+    }
+
+
 # --- Graph nodes -----------------------------------------------------------
-def _make_nodes(retriever: BaseRetriever):
+def _make_nodes(retriever: BaseRetriever, strategy: str, embedding_name: str):
     grader = _grader()
     rewriter = REWRITE_PROMPT | get_llm() | StrOutputParser()
     generator = ANSWER_PROMPT | get_llm() | StrOutputParser()
 
     def retrieve(state: CRAGState) -> CRAGState:
+        t = time.perf_counter()
         docs = retriever.invoke(state["question"])
-        return {**state, "documents": docs, "used_web_search": False}
+        ev = {"step": "retrieve", "label": "1 · Retrieve",
+              "detail": f"Retrieved {len(docs)} candidate chunks using the '{strategy}' strategy on the '{embedding_name}' embedding.",
+              "count": len(docs), "ms": round((time.perf_counter() - t) * 1000)}
+        return {**state, "documents": docs, "used_web_search": False,
+                "trace": state.get("trace", []) + [ev]}
 
     def grade_documents(state: CRAGState) -> CRAGState:
-        kept: List[Document] = []
+        t = time.perf_counter()
+        kept, dropped = [], []
         for d in state["documents"]:
-            score = grader.invoke(
-                {"document": d.page_content, "question": state["question"]}
-            )
-            if score.binary_score.strip().lower() == "yes":
-                kept.append(d)
-        return {**state, "documents": kept}
+            score = grader.invoke({"document": d.page_content, "question": state["question"]})
+            (kept if score.binary_score.strip().lower() == "yes" else dropped).append(d)
+        decision = ("At least one chunk is relevant → answer from the papers."
+                    if kept else "No chunk is relevant → fall back to a live web search.")
+        evs = [
+            {"step": "grade", "label": "2 · Grade relevance",
+             "detail": f"An LLM graded each chunk; kept {len(kept)} of {len(state['documents'])} as actually relevant.",
+             "kept": [_label(d) for d in kept], "dropped": [_label(d) for d in dropped],
+             "ms": round((time.perf_counter() - t) * 1000)},
+            {"step": "decide", "label": "3 · Decision", "detail": decision},
+        ]
+        return {**state, "documents": kept, "trace": state.get("trace", []) + evs}
 
     def transform_query(state: CRAGState) -> CRAGState:
+        t = time.perf_counter()
         better = rewriter.invoke({"question": state["question"]})
-        return {**state, "question": better}
+        ev = {"step": "rewrite", "label": "4 · Rewrite query",
+              "detail": "Rewrote the question into a web-search query.",
+              "from": state["question"], "to": better, "ms": round((time.perf_counter() - t) * 1000)}
+        return {**state, "question": better, "trace": state.get("trace", []) + [ev]}
 
     def do_web_search(state: CRAGState) -> CRAGState:
+        t = time.perf_counter()
         web_docs = web_search(state["question"])
-        # Combine any surviving paper chunks with fresh web results.
-        return {
-            **state,
-            "documents": state["documents"] + web_docs,
-            "used_web_search": True,
-        }
+        ev = {"step": "websearch", "label": "5 · Web search",
+              "detail": f"Fetched {len(web_docs)} live web results (DuckDuckGo).",
+              "count": len(web_docs), "ms": round((time.perf_counter() - t) * 1000)}
+        return {**state, "documents": state["documents"] + web_docs,
+                "used_web_search": True, "trace": state.get("trace", []) + [ev]}
 
     def generate(state: CRAGState) -> CRAGState:
+        t = time.perf_counter()
         context = format_context(state["documents"])
-        answer = generator.invoke(
-            {"context": context, "question": state["question"]}
-        )
-        return {**state, "generation": answer}
+        answer = generator.invoke({"context": context, "question": state["question"]})
+        ev = {"step": "generate", "label": "6 · Generate",
+              "detail": f"Claude ({config.CLAUDE_MODEL}) wrote the answer from {len(state['documents'])} context chunks.",
+              "context": [_label(d) for d in state["documents"]],
+              "context_text": context[:6000], "model": config.CLAUDE_MODEL,
+              "ms": round((time.perf_counter() - t) * 1000)}
+        return {**state, "generation": answer, "trace": state.get("trace", []) + [ev]}
 
     return retrieve, grade_documents, transform_query, do_web_search, generate
 
@@ -132,7 +163,7 @@ def build_crag_app(
         retriever = get_retriever(strategy, embedding_name)
 
     retrieve, grade_documents, transform_query, do_web_search, generate = _make_nodes(
-        retriever
+        retriever, strategy, embedding_name
     )
 
     g = StateGraph(CRAGState)
@@ -161,12 +192,13 @@ def answer_question_crag(question: str, app=None, **kwargs) -> dict:
     if app is None:
         app = build_crag_app(**kwargs)
     final = app.invoke({"question": question, "documents": [], "generation": "",
-                         "used_web_search": False})
+                         "used_web_search": False, "trace": []})
     return {
         "answer": final["generation"],
         "sources": format_sources(final["documents"]),
         "documents": final["documents"],
         "used_web_search": final["used_web_search"],
+        "trace": final.get("trace", []),
     }
 
 
