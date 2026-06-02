@@ -30,7 +30,7 @@ from src.vectorstore import load_vectorstore
 def _item(doc: Document, rank: int, score: Optional[float]) -> Dict:
     return {
         "rank": rank,
-        "title": doc.metadata.get("title", "Unknown"),
+        "title": config.display_title(doc.metadata.get("source", ""), doc.metadata.get("title", "Unknown")),
         "page": doc.metadata.get("page_number", "?"),
         "source": doc.metadata.get("source", ""),
         "score": None if score is None else round(float(score), 4),

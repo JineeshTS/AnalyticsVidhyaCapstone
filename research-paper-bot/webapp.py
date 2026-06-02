@@ -94,7 +94,7 @@ def _doc_summary(corpus) -> list:
     for d in corpus:
         src = d.metadata.get("source", "?")
         if src not in by_src:
-            by_src[src] = {"title": d.metadata.get("title", src), "source": src, "chunks": 0}
+            by_src[src] = {"title": config.display_title(src, d.metadata.get("title", src)), "source": src, "chunks": 0}
         by_src[src]["chunks"] += 1
     return sorted(by_src.values(), key=lambda x: x["title"].lower())
 
@@ -323,7 +323,7 @@ async def upload(file: UploadFile = File(...)) -> dict:
             sample = chunks[len(chunks) // 2] if chunks else None
             return {
                 "filename": safe,
-                "title": chunks[0].metadata.get("title", safe) if chunks else safe,
+                "title": config.display_title(safe, chunks[0].metadata.get("title", safe)) if chunks else safe,
                 "pages": pages,
                 "chunks": len(chunks),
                 "sample_chunk": {
