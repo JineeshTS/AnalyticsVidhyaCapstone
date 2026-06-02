@@ -237,13 +237,20 @@
     <!-- INSPECTOR -->
     <section class="tab" id="tab-inspect"><div class="wrap">
       <h2>Retrieval Inspector</h2>
-      <p class="sub"><b>Inspect strategies</b>: dense → BM25 → hybrid → reranked for one embedding (watch chunks move between Hybrid and Reranked — that's the cross-encoder; green = final top-3). <b>Compare embeddings</b>: the same query through every embedding (open-source vs commercial) side by side.</p>
+      <p class="sub">See <i>how</i> the system finds context for a question — before any answer is written. Type a question, then either <b>Inspect strategies</b> (one embedding: dense → BM25 → hybrid → reranked, side by side) or <b>Compare embeddings</b> (the same question through every embedding).</p>
+      <div style="font-size:13px;font-weight:600;margin:0 0 5px">① Type a question to retrieve for</div>
+      <input id="iq" class="txt" value="What problem do positional encodings solve?" placeholder="Type any question about the papers…" style="width:100%" />
+      <div class="chips" style="margin-top:7px">
+        <span class="chip" onclick="setIq(this.innerText)">What problem do positional encodings solve?</span>
+        <span class="chip" onclick="setIq(this.innerText)">How does BERT pre-training work?</span>
+        <span class="chip" onclick="setIq(this.innerText)">few-shot learning in language models</span>
+      </div>
+      <div style="font-size:13px;font-weight:600;margin:14px 0 5px">② Run it</div>
       <div class="row">
-        <input id="iq" class="txt" placeholder="e.g. What problem do positional encodings solve?" style="flex:1" />
         <label class="sub" style="margin:0">Embedding <select id="iEmb"></select></label>
-        <button class="primary" id="iBtn" onclick="runInspect()">Inspect strategies</button>
+        <button class="primary" id="iBtn" onclick="runInspect()">🔍 Inspect strategies</button>
         <button class="btn" id="ceBtn" onclick="runCompare()">⇄ Compare embeddings</button></div>
-      <div class="cols" id="icols"></div>
+      <div class="cols" id="icols"><p class="sub" style="margin-top:16px">↑ Type a question and click a button — the retrieved chunks (with relevance scores) will appear here in columns.</p></div>
     </div></section>
 
     <!-- HOW IT WORKS -->
@@ -454,9 +461,12 @@ async function resetCorpus(){
 }
 
 // inspector
+function setIq(t){$('#iq').value=t;$('#iq').focus();}
 $('#iq').addEventListener('keydown',e=>{if(e.key==='Enter')runInspect();});
-const SD={dense:'Embedding cosine similarity (semantic).',bm25:'BM25 keyword scoring (lexical).',
-  hybrid:'Dense + BM25 fused (Reciprocal Rank Fusion).',reranked:'Cross-encoder rescoring — final order. Green = kept.'};
+const SD={dense:'Semantic match — by meaning (embedding similarity). Higher = closer.',
+  bm25:'Keyword match — by exact words (BM25). Higher = stronger keyword overlap.',
+  hybrid:'Both combined — semantic + keyword fused (RRF).',
+  reranked:'Re-scored for true relevance by a cross-encoder. Green = the top-3 used to answer.'};
 async function runInspect(){
   const q=$('#iq').value.trim();if(!q)return;const cols=$('#icols');$('#iBtn').disabled=true;
   cols.innerHTML='<p class="sub">Running all stages…</p>';
