@@ -148,6 +148,45 @@ def health() -> dict:
             "strategy": _state.get("strategy"), "backend": config.LLM_BACKEND}
 
 
+@app.get("/api/prompts")
+def prompts() -> dict:
+    """The actual prompts sent to the LLM, the config knobs, and the pipeline —
+    so the evaluator can see exactly how the system is wired."""
+    from src.crag import ANSWER_PROMPT, GRADE_PROMPT, REWRITE_PROMPT
+
+    def tmpl_text(tmpl):
+        out = []
+        for m in tmpl.messages:
+            role = getattr(m, "role", None) or type(m).__name__.replace("MessagePromptTemplate", "")
+            text = getattr(getattr(m, "prompt", None), "template", None)
+            if text is None:
+                continue
+            out.append(f"[{role.lower()}]\n{text}")
+        return "\n\n".join(out)
+
+    return {
+        "prompts": [
+            {"name": "Answer (RAG generation)", "role": "Generate the grounded answer from retrieved context", "text": tmpl_text(ANSWER_PROMPT)},
+            {"name": "Relevance grader (CRAG)", "role": "Decide if a retrieved chunk actually helps answer the question", "text": tmpl_text(GRADE_PROMPT)},
+            {"name": "Query rewriter (CRAG)", "role": "Turn the question into a web-search query before the fallback", "text": tmpl_text(REWRITE_PROMPT)},
+            {"name": "Follow-up condenser", "role": "Rewrite a follow-up into a standalone question using chat history", "text": tmpl_text(CONDENSE_PROMPT)},
+        ],
+        "config": {
+            "CHUNK_SIZE": config.CHUNK_SIZE, "CHUNK_OVERLAP": config.CHUNK_OVERLAP,
+            "TOP_K": config.TOP_K, "TOP_SOURCES": config.TOP_SOURCES,
+            "RERANK_TOP_N": config.RERANK_TOP_N, "WEB_SEARCH_RESULTS": config.WEB_SEARCH_RESULTS,
+            "LLM_BACKEND": config.LLM_BACKEND, "CLAUDE_MODEL": config.CLAUDE_MODEL,
+        },
+        "pipeline": [
+            "retrieve — fetch candidate chunks (dense + BM25, fused; optional rerank)",
+            "grade — an LLM judges each chunk for real relevance",
+            "decide — relevant chunks? answer from papers : fall back to web",
+            "rewrite + web search — only when no chunk is relevant (DuckDuckGo)",
+            "generate — Claude writes the answer from the context, with sources",
+        ],
+    }
+
+
 @app.get("/api/evaluation")
 def evaluation() -> dict:
     """The real benchmark output (storage/eval_results.csv), ranked."""
@@ -445,7 +484,7 @@ async def ask(req: AskRequest, response: Response, sid: str | None = Cookie(defa
         try:
             result = await asyncio.to_thread(
                 crag_app.invoke,
-                {"question": standalone, "documents": [], "generation": "", "used_web_search": False},
+                {"question": standalone, "documents": [], "generation": "", "used_web_search": False, "trace": []},
             )
         except Exception as e:
             return JSONResponse({"error": f"Generation failed: {e}"}, status_code=502)
@@ -453,6 +492,7 @@ async def ask(req: AskRequest, response: Response, sid: str | None = Cookie(defa
     answer = result.get("generation", "")
     used_web = bool(result.get("used_web_search"))
     docs = result.get("documents", [])
+    trace = result.get("trace", [])
 
     memory.add_message(sid, "user", question)
     memory.add_message(sid, "assistant", answer)
@@ -472,5 +512,6 @@ async def ask(req: AskRequest, response: Response, sid: str | None = Cookie(defa
         "used_web_search": used_web,
         "standalone_question": standalone if standalone != question else None,
         "sources": sources,
+        "trace": trace,
         "config": {"embedding": _state["embedding"], "strategy": _state["strategy"]},
     }

@@ -77,6 +77,31 @@
   .src .t{font-weight:600;color:var(--accent)}.src .p{color:var(--faint);font-size:10.5px;margin-left:5px}
   .src .snip{color:var(--muted);margin-top:3px;font-size:11px;line-height:1.4}
   .typing{color:var(--muted);font-style:italic}
+  /* answer trace */
+  details.trace{margin-top:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);overflow:hidden}
+  details.trace>summary{cursor:pointer;padding:7px 10px;font-size:11px;color:var(--accent);list-style:none;user-select:none}
+  details.trace>summary::-webkit-details-marker{display:none}
+  details.trace[open]>summary{border-bottom:1px solid var(--line)}
+  .tstep{padding:7px 10px;border-bottom:1px solid var(--line);font-size:11px}
+  .tstep:last-child{border-bottom:none}
+  .tstep .tl{display:flex;gap:6px;align-items:baseline}
+  .tstep .tlab{font-weight:600;color:var(--text)}.tstep .tms{margin-left:auto;color:var(--faint);font-family:ui-monospace,monospace;font-size:10px}
+  .tstep .td{color:var(--muted);margin-top:2px;line-height:1.4}
+  .tstep .tdoc{color:var(--faint);font-size:10.5px;margin-top:2px}
+  .tstep .drop{color:#c98}.tstep .keep{color:var(--good)}
+  .tstep .rw{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--muted);margin-top:3px}
+  .tctx{margin-top:4px}.tctx>summary{cursor:pointer;color:var(--accent);font-size:10.5px}
+  .tctx pre{white-space:pre-wrap;font-size:10px;color:var(--muted);margin-top:4px;max-height:160px;overflow:auto;background:var(--panel3);border:1px solid var(--line);border-radius:6px;padding:8px}
+  /* how it works */
+  .pipe{display:flex;flex-direction:column;gap:6px}
+  .pipe .pstep{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px}
+  .pipe .pstep .n{width:22px;height:22px;border-radius:50%;background:var(--grad);color:#fff;display:grid;place-items:center;font-size:11px;font-weight:700;flex:none}
+  .promptcard{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:13px;margin-bottom:10px}
+  .promptcard .nm{font-weight:650;font-size:13.5px}.promptcard .rl{color:var(--muted);font-size:12px;margin:2px 0 8px}
+  .promptcard pre{white-space:pre-wrap;font-size:11.5px;color:var(--text);background:var(--panel3);border:1px solid var(--line);border-radius:8px;padding:10px;line-height:1.5;overflow:auto}
+  .knobs{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px}
+  .knob{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12px}
+  .knob .kk{color:var(--muted);font-size:10.5px}.knob .kv{font-family:ui-monospace,monospace;color:var(--accent);font-size:13px;margin-top:2px}
   .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
   .chip{font-size:11px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:4px 9px;border-radius:20px;cursor:pointer}
   .chip:hover{border-color:var(--accent);color:var(--text)}
@@ -176,6 +201,7 @@
     <button data-tab="criteria" class="active"><span class="ic">✅</span><span class="t">Criteria</span></button>
     <button data-tab="corpus"><span class="ic">📥</span><span class="t">Corpus</span></button>
     <button data-tab="inspect"><span class="ic">🔍</span><span class="t">Inspector</span></button>
+    <button data-tab="how"><span class="ic">🧠</span><span class="t">How it works</span></button>
     <button data-tab="stack"><span class="ic">🧩</span><span class="t">Stack</span></button>
     <button data-tab="code"><span class="ic">📄</span><span class="t">Code</span></button>
     <div class="navfoot">Zero-API-cost RAG<br>powered by a local Claude CLI.</div>
@@ -217,6 +243,18 @@
         <label class="sub" style="margin:0">Embedding <select id="iEmb"></select></label>
         <button class="primary" id="iBtn" onclick="runInspect()">Inspect</button></div>
       <div class="cols" id="icols"></div>
+    </div></section>
+
+    <!-- HOW IT WORKS -->
+    <section class="tab" id="tab-how"><div class="wrap">
+      <h2>How it works</h2>
+      <p class="sub">The exact pipeline, the real prompts sent to the LLM, and the config — nothing hidden.</p>
+      <h3 style="font-size:14px;margin:14px 0 6px">Pipeline (Corrective RAG · LangGraph)</h3>
+      <div id="pipeline"></div>
+      <h3 style="font-size:14px;margin:20px 0 6px">Prompts sent to the LLM</h3>
+      <div id="prompts"></div>
+      <h3 style="font-size:14px;margin:20px 0 6px">Configuration</h3>
+      <div id="cfgknobs"></div>
     </div></section>
 
     <!-- STACK -->
@@ -276,6 +314,13 @@ function showTab(name){
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id==='tab-'+name));
   if(name==='corpus')loadCorpus(); if(name==='stack')loadStack();
   if(name==='code')loadCodeList(); if(name==='criteria')loadCriteria();
+  if(name==='how')loadHow();
+}
+async function loadHow(){
+  const d=await (await fetch('/api/prompts')).json();
+  $('#pipeline').innerHTML='<div class="pipe">'+d.pipeline.map((s,i)=>`<div class="pstep"><span class="n">${i+1}</span><span>${esc(s)}</span></div>`).join('')+'</div>';
+  $('#prompts').innerHTML=d.prompts.map(p=>`<div class="promptcard"><div class="nm">${esc(p.name)}</div><div class="rl">${esc(p.role)}</div><pre>${esc(p.text)}</pre></div>`).join('');
+  $('#cfgknobs').innerHTML='<div class="knobs">'+Object.entries(d.config).map(([k,v])=>`<div class="knob"><div class="kk">${esc(k)}</div><div class="kv">${esc(String(v))}</div></div>`).join('')+'</div>';
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 
@@ -325,9 +370,31 @@ async function ask(text){
         const link=web&&s.source?'<a href="'+esc(s.source)+'" target="_blank" rel="noopener">'+t+'</a>':t;
         h+='<div class="src"><span class="t">'+link+'</span>'+loc+'<div class="snip">'+esc(s.snippet||'')+'</div></div>';}
       h+='</div>';}
+    if(d.trace&&d.trace.length)h+=traceHtml(d.trace);
     bot.innerHTML=h;
   }catch(e){bot.innerHTML='<span class="err">Network error</span>';}
   finally{sendBtn.disabled=false;qBox.focus();chat.scrollTop=chat.scrollHeight;}
+}
+
+function docLine(x){return '<span class="tdoc">• '+esc(x.title)+(x.web?' (web)':' · p'+esc(x.page))+'</span>';}
+function traceHtml(trace){
+  const total=trace.reduce((a,s)=>a+(s.ms||0),0);
+  let h='<details class="trace"><summary>🔬 How this answer was produced — '+trace.length+' steps · '+total+' ms (click)</summary>';
+  for(const s of trace){
+    h+='<div class="tstep"><div class="tl"><span class="tlab">'+esc(s.label)+'</span>'+(s.ms!=null?'<span class="tms">'+s.ms+' ms</span>':'')+'</div>';
+    h+='<div class="td">'+esc(s.detail)+'</div>';
+    if(s.step==='grade'){
+      if(s.kept&&s.kept.length)h+='<div class="keep">kept:</div>'+s.kept.map(docLine).join('');
+      if(s.dropped&&s.dropped.length)h+='<div class="drop">dropped:</div>'+s.dropped.map(docLine).join('');
+    }
+    if(s.step==='rewrite')h+='<div class="rw">from: '+esc(s.from)+'<br>to: '+esc(s.to)+'</div>';
+    if(s.step==='generate'){
+      h+=(s.context||[]).map(docLine).join('');
+      if(s.context_text)h+='<details class="tctx"><summary>view exact context sent to the LLM</summary><pre>'+esc(s.context_text)+'</pre></details>';
+    }
+    h+='</div>';
+  }
+  return h+'</details>';
 }
 
 // corpus
