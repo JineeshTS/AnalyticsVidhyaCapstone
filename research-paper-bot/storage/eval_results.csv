@@ -1,0 +1,10 @@
+embedding,strategy,avg_score,avg_latency_s
+minilm,dense,4.6,10.24
+minilm,hybrid,4.8,9.51
+minilm,hybrid_rerank,3.6,13.29
+bge,dense,4.6,9.86
+bge,hybrid,4.8,8.76
+bge,hybrid_rerank,4,11.71
+gemini,dense,4.6,9.89
+gemini,hybrid,4.8,9.71
+gemini,hybrid_rerank,4,11.66
