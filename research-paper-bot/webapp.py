@@ -1,21 +1,21 @@
 """
-FastAPI web app for the Research Paper Answer Bot.
+FastAPI web app for the Research Paper Answer Bot — an interactive RAG explorer.
 
-A thin, self-contained web surface over the existing Corrective-RAG pipeline
-(src/crag.py) — built as a cleaner, brandable demo UI alongside the Chainlit app.
-It is intentionally light: one /api/ask endpoint plus a single static page.
+Three surfaces over the existing pipeline:
+  - /api/ask      : answer a question (Corrective-RAG) with sources + web badge
+  - /api/inspect  : the retrieval internals (dense / bm25 / hybrid / reranked)
+  - /api/upload   : add a PDF live → chunk → embed → index → queryable instantly
+  - /api/corpus   : list indexed documents + current config + options
+  - /api/config   : switch embedding / retrieval strategy at runtime
+  - /api/reset    : drop uploaded docs, restore the original corpus
 
-Production notes (this is meant to run public at paperbot.ganakys.com):
-  - The CRAG graph + retriever are built ONCE at startup and reused, so requests
-    don't rebuild the BM25 corpus or reload models.
-  - A concurrency semaphore caps how many `claude` CLI subprocesses run at once,
-    so a public URL can't fan out and drain the Claude Max quota.
-  - The blocking CRAG call runs in a worker thread so the event loop stays free.
-  - Per-browser session id (cookie) drives the multi-user conversational memory;
-    follow-ups are condensed to standalone questions before retrieval.
+Production notes (runs public at paperbot.ganakys.com, gated by nginx):
+  - Heavy objects (CRAG graph, corpus, cross-encoder) are built once and cached;
+    a rebuild lock serializes corpus mutations and swaps the graph atomically.
+  - A concurrency semaphore caps simultaneous `claude` CLI subprocesses.
+  - The blocking pipeline calls run in worker threads.
 
 Run locally:  uvicorn webapp:app --host 127.0.0.1 --port 8011
-Behind nginx, access control (Basic Auth + rate limit) is handled at the proxy.
 """
 
 from __future__ import annotations
@@ -25,18 +25,19 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Cookie, FastAPI, Request, Response
+from fastapi import Cookie, FastAPI, File, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel
 
 import config
 from src import memory
 from src.crag import build_crag_app
+from src.ingest import build_corpus, load_single_pdf
+from src.inspect import inspect_query
 from src.rag import format_sources, get_llm
-
-# Reuse the same follow-up condenser the Chainlit app uses.
-from langchain_core.prompts import ChatPromptTemplate
+from src.vectorstore import add_to_vectorstore, has_vectorstore
 
 CONDENSE_PROMPT = ChatPromptTemplate.from_messages(
     [
@@ -51,20 +52,70 @@ CONDENSE_PROMPT = ChatPromptTemplate.from_messages(
     ]
 )
 
-# Cap concurrent CRAG runs (each can spawn several `claude` calls).
+STRATEGIES = ["dense", "hybrid", "hybrid_rerank"]
 MAX_CONCURRENCY = 2
-_semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def _source_allowlist() -> dict:
+    """Map relative path -> absolute path for the source files we expose in the
+    in-app code browser. Excludes secrets (.env), venv, data, storage, .git."""
+    groups = {
+        "Entry points": ["config.py", "build_index.py", "evaluate.py", "app.py", "webapp.py"],
+        "src/": sorted(p.name for p in (PROJECT_ROOT / "src").glob("*.py")),
+        "scripts/": ["download_papers.py"],
+        "web/": ["index.html"],
+        "deploy/": sorted(p.name for p in (PROJECT_ROOT / "deploy").glob("*") if p.is_file()),
+        "docs/config": ["requirements.txt", ".env.example", "README.md"],
+    }
+    prefix = {"src/": "src/", "scripts/": "scripts/", "web/": "web/", "deploy/": "deploy/"}
+    allow = {}
+    for grp, names in groups.items():
+        for n in names:
+            rel = prefix.get(grp, "") + n
+            ap = (PROJECT_ROOT / rel).resolve()
+            if ap.is_file() and PROJECT_ROOT in ap.parents or ap == PROJECT_ROOT:
+                if ap.is_file():
+                    allow[rel] = ap
+    return allow
+
+_semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+_rebuild_lock = asyncio.Lock()
 STATIC_DIR = Path(__file__).resolve().parent / "web"
 
 _state: dict = {}
 
 
+def _doc_summary(corpus) -> list:
+    """Group the in-memory corpus by source → [{title, source, chunks}]."""
+    by_src: dict = {}
+    for d in corpus:
+        src = d.metadata.get("source", "?")
+        if src not in by_src:
+            by_src[src] = {"title": d.metadata.get("title", src), "source": src, "chunks": 0}
+        by_src[src]["chunks"] += 1
+    return sorted(by_src.values(), key=lambda x: x["title"].lower())
+
+
+def _rebuild_state():
+    """(Re)build corpus + CRAG graph for the current embedding/strategy. Blocking."""
+    corpus = build_corpus()
+    _state["corpus"] = corpus
+    _state["original_sources"] = _state.get("original_sources") or {d.metadata.get("source") for d in corpus}
+    _state["crag_app"] = build_crag_app(
+        strategy=_state["strategy"], embedding_name=_state["embedding"]
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Build the heavy objects once.
-    _state["crag_app"] = build_crag_app()  # uses DEFAULT_EMBEDDING + DEFAULT_STRATEGY
+    _state["embedding"] = config.DEFAULT_EMBEDDING
+    _state["strategy"] = config.DEFAULT_STRATEGY
+    _rebuild_state()
     _state["condenser"] = CONDENSE_PROMPT | get_llm() | StrOutputParser()
+    _state["cross_encoder"] = None  # built lazily on first /api/inspect
     yield
     _state.clear()
 
@@ -76,6 +127,16 @@ class AskRequest(BaseModel):
     question: str
 
 
+class InspectRequest(BaseModel):
+    query: str
+    embedding: str | None = None
+
+
+class ConfigRequest(BaseModel):
+    embedding: str | None = None
+    strategy: str | None = None
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
@@ -83,12 +144,250 @@ def index() -> FileResponse:
 
 @app.get("/api/health")
 def health() -> dict:
+    return {"status": "ok", "embedding": _state.get("embedding"),
+            "strategy": _state.get("strategy"), "backend": config.LLM_BACKEND}
+
+
+@app.get("/api/evaluation")
+def evaluation() -> dict:
+    """The real benchmark output (storage/eval_results.csv), ranked."""
+    import csv
+    path = config.STORAGE_DIR / "eval_results.csv"
+    if not path.exists():
+        return {"rows": [], "note": "Run `python evaluate.py` to generate this."}
+    rows = []
+    with open(path, newline="") as f:
+        for r in csv.DictReader(f):
+            rows.append({"embedding": r["embedding"], "strategy": r["strategy"],
+                         "avg_score": float(r["avg_score"]), "avg_latency_s": float(r["avg_latency_s"])})
+    rows.sort(key=lambda x: (-x["avg_score"], x["avg_latency_s"]))
+    best = rows[0] if rows else None
+    return {"rows": rows, "best": best,
+            "method": "LLM-as-judge answer quality (1-5) + latency, over 5 sample queries × 3 embeddings × 3 strategies."}
+
+
+@app.get("/api/criteria")
+def criteria() -> dict:
+    """Live rubric: each capstone goal, whether it's met, how, and where to see it."""
+    docs = _doc_summary(_state.get("corpus", []))
+    built = [n for n in config.EMBEDDING_MODELS if has_vectorstore(n)]
+    commercial = [n for n in built if config.EMBEDDING_MODELS[n]["provider"] in ("gemini", "openai")]
+    opensource = [n for n in built if config.EMBEDDING_MODELS[n]["provider"] == "huggingface"]
+    has_eval = (config.STORAGE_DIR / "eval_results.csv").exists()
+
+    def c(group, title, met, how, tab):
+        return {"group": group, "title": title, "met": met, "how": how, "tab": tab}
+
+    items = [
+        c("Compulsory", "Dataset of research papers", len(docs) > 0,
+          f"{len(docs)} papers loaded ({sum(d['chunks'] for d in docs)} chunks). Add more in the Corpus tab.", "corpus"),
+        c("Compulsory", "Load & index in a vector database", len(built) > 0,
+          f"Chroma — one collection per embedding ({', '.join(built)}).", "stack"),
+        c("Compulsory", "Compare embeddings (open-source + commercial)",
+          len(opensource) > 0 and len(commercial) > 0,
+          f"Open-source: {', '.join(opensource)} · Commercial: {', '.join(commercial)}.", "stack"),
+        c("Compulsory", "Compare retrieval strategies (cosine → hybrid → reranker)", True,
+          "dense / hybrid (dense+BM25) / hybrid_rerank (cross-encoder) — see them side-by-side.", "inspect"),
+        c("Compulsory", "Vector DB connected to an LLM (RAG pipeline)", True,
+          f"Claude ({config.CLAUDE_MODEL}) via local CLI; LangGraph orchestrates retrieve→generate.", "chat"),
+        c("Compulsory", "Tested on sample queries + chosen best approach", has_eval,
+          "evaluate.py benchmark — see the ranked results table below.", "criteria"),
+        c("Compulsory", "Show the source of every answer (top 3)", True,
+          "Each answer lists the top-3 source chunks with paper title + page.", "chat"),
+        c("Stretch", "Multi-user conversational RAG", True,
+          "Per-session memory (SQLite) + follow-ups condensed to standalone questions.", "chat"),
+        c("Stretch", "Streamlit / Chainlit app (a UI)", True,
+          "This FastAPI web app (and a Chainlit app) on top of the RAG system.", "chat"),
+        c("Stretch", "Agentic Corrective RAG + web search", True,
+          "LangGraph grades chunks; if irrelevant it rewrites the query and searches the web.", "inspect"),
+    ]
+    met = sum(1 for i in items if i["met"])
+    return {"items": items, "met": met, "total": len(items)}
+
+
+@app.get("/api/info")
+def info() -> dict:
+    """The full model/tech stack — for the evaluator to see what powers each part."""
+    llm_label = (f"Claude ({config.CLAUDE_MODEL}) via local claude CLI — no API cost"
+                 if config.LLM_BACKEND == "claude_cli"
+                 else f"OpenAI {config.LLM_MODEL}")
+    embeddings = [{
+        "name": n, "model": s["model_name"], "label": s["label"],
+        "type": ("commercial" if s["provider"] in ("openai", "gemini") else "open-source"),
+        "active": n == _state["embedding"], "ready": has_vectorstore(n),
+    } for n, s in config.EMBEDDING_MODELS.items()]
     return {
-        "status": "ok",
-        "embedding": config.DEFAULT_EMBEDDING,
-        "strategy": config.DEFAULT_STRATEGY,
-        "backend": config.LLM_BACKEND,
+        "llm": {"role": "Generation · CRAG grader · query rewriter · follow-up condenser",
+                "backend": config.LLM_BACKEND, "model": config.CLAUDE_MODEL, "label": llm_label},
+        "embeddings": embeddings,
+        "reranker": {"role": "Cross-encoder reranking (hybrid_rerank)", "model": config.RERANKER_MODEL,
+                     "type": "open-source", "active": _state["strategy"] == "hybrid_rerank"},
+        "vector_db": {"name": "Chroma", "note": "one persisted collection per embedding"},
+        "keyword": {"name": "BM25 (rank_bm25)", "note": "sparse retrieval fused into hybrid"},
+        "web_search": {"name": "DuckDuckGo (ddgs)", "note": "Corrective-RAG fallback when papers don't cover a query"},
+        "orchestration": {"name": "LangGraph", "note": "retrieve → grade → (rewrite → web) → generate"},
+        "active": {"embedding": _state["embedding"], "strategy": _state["strategy"]},
     }
+
+
+@app.get("/api/corpus")
+def corpus() -> dict:
+    embeddings = [{"name": n, "label": s["label"], "ready": has_vectorstore(n)}
+                  for n, s in config.EMBEDDING_MODELS.items()]
+    docs = _doc_summary(_state.get("corpus", []))
+    return {
+        "documents": docs,
+        "total_docs": len(docs),
+        "total_chunks": sum(d["chunks"] for d in docs),
+        "config": {"embedding": _state["embedding"], "strategy": _state["strategy"]},
+        "options": {"embeddings": embeddings, "strategies": STRATEGIES},
+    }
+
+
+def _lang_for(rel: str) -> str:
+    ext = rel.rsplit(".", 1)[-1].lower()
+    return {"py": "python", "html": "html", "md": "markdown", "txt": "plaintext",
+            "service": "ini", "conf": "nginx", "example": "ini"}.get(ext, "plaintext")
+
+
+@app.get("/api/source")
+def source_list() -> dict:
+    """Grouped list of source files available in the in-app code browser."""
+    allow = _state.get("source_allow") or _source_allowlist()
+    _state["source_allow"] = allow
+    groups: dict = {}
+    for rel in allow:
+        grp = rel.split("/", 1)[0] + "/" if "/" in rel else "(root)"
+        groups.setdefault(grp, []).append(rel)
+    return {"files": [{"group": g, "paths": sorted(v)} for g, v in sorted(groups.items())]}
+
+
+@app.get("/api/source/file")
+def source_file(path: str) -> dict:
+    allow = _state.get("source_allow") or _source_allowlist()
+    _state["source_allow"] = allow
+    ap = allow.get(path)
+    if not ap:
+        return JSONResponse({"error": "File not available."}, status_code=404)
+    try:
+        content = ap.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return {"path": path, "language": _lang_for(path), "lines": content.count("\n") + 1,
+            "content": content}
+
+
+@app.post("/api/config")
+async def set_config(req: ConfigRequest) -> dict:
+    new_emb = req.embedding or _state["embedding"]
+    new_strat = req.strategy or _state["strategy"]
+    if new_emb not in config.EMBEDDING_MODELS:
+        return JSONResponse({"error": f"Unknown embedding '{new_emb}'."}, status_code=400)
+    if not has_vectorstore(new_emb):
+        return JSONResponse({"error": f"No index built for '{new_emb}'."}, status_code=400)
+    if new_strat not in STRATEGIES:
+        return JSONResponse({"error": f"Unknown strategy '{new_strat}'."}, status_code=400)
+    async with _rebuild_lock:
+        _state["embedding"] = new_emb
+        _state["strategy"] = new_strat
+        await asyncio.to_thread(_rebuild_state)
+    return {"embedding": new_emb, "strategy": new_strat}
+
+
+@app.post("/api/upload")
+async def upload(file: UploadFile = File(...)) -> dict:
+    if not file.filename.lower().endswith(".pdf"):
+        return JSONResponse({"error": "Only PDF files are supported."}, status_code=400)
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        return JSONResponse({"error": "File too large (max 25 MB)."}, status_code=400)
+
+    safe = Path(file.filename).name
+    dest = config.DATA_DIR / safe
+    dest.write_bytes(data)
+
+    async with _rebuild_lock:
+        def _ingest():
+            chunks = load_single_pdf(dest)
+            pages = len({c.metadata.get("page_number") for c in chunks})
+            emb_status = []
+            for name in config.EMBEDDING_MODELS:
+                if not has_vectorstore(name):
+                    continue
+                try:
+                    add_to_vectorstore(chunks, name)
+                    emb_status.append({"name": name, "label": config.EMBEDDING_MODELS[name]["label"], "status": "indexed"})
+                except Exception as e:  # e.g. gemini quota — keep the local ones
+                    emb_status.append({"name": name, "label": config.EMBEDDING_MODELS[name]["label"], "status": f"error: {str(e)[:80]}"})
+            _rebuild_state()  # refresh corpus + graph so it's queryable now
+            sample = chunks[len(chunks) // 2] if chunks else None
+            return {
+                "filename": safe,
+                "title": chunks[0].metadata.get("title", safe) if chunks else safe,
+                "pages": pages,
+                "chunks": len(chunks),
+                "sample_chunk": {
+                    "page": sample.metadata.get("page_number") if sample else None,
+                    "text": (sample.page_content[:400].strip() if sample else ""),
+                } if sample else None,
+                "embeddings": emb_status,
+            }
+        result = await asyncio.to_thread(_ingest)
+
+    docs = _doc_summary(_state["corpus"])
+    result["total_docs"] = len(docs)
+    result["total_chunks"] = sum(d["chunks"] for d in docs)
+    return result
+
+
+@app.post("/api/reset")
+async def reset() -> dict:
+    """Remove uploaded PDFs and rebuild from the original corpus."""
+    async with _rebuild_lock:
+        def _do():
+            original = _state.get("original_sources") or set()
+            removed = []
+            for pdf in config.DATA_DIR.glob("*.pdf"):
+                if pdf.name not in original:
+                    # Delete this doc's chunks from every collection, then the file.
+                    for name in config.EMBEDDING_MODELS:
+                        if not has_vectorstore(name):
+                            continue
+                        try:
+                            from src.vectorstore import load_vectorstore
+                            load_vectorstore(name).delete(where={"source": pdf.name})
+                        except Exception:
+                            pass
+                    pdf.unlink()
+                    removed.append(pdf.name)
+            _rebuild_state()
+            return removed
+        removed = await asyncio.to_thread(_do)
+    docs = _doc_summary(_state["corpus"])
+    return {"removed": removed, "total_docs": len(docs),
+            "total_chunks": sum(d["chunks"] for d in docs)}
+
+
+@app.post("/api/inspect")
+async def inspect(req: InspectRequest) -> dict:
+    query = (req.query or "").strip()
+    if not query:
+        return JSONResponse({"error": "Empty query."}, status_code=400)
+    emb = req.embedding or _state["embedding"]
+    if emb not in config.EMBEDDING_MODELS or not has_vectorstore(emb):
+        return JSONResponse({"error": f"No index for '{emb}'."}, status_code=400)
+
+    async with _semaphore:
+        def _run():
+            if _state.get("cross_encoder") is None:
+                from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+                _state["cross_encoder"] = HuggingFaceCrossEncoder(model_name=config.RERANKER_MODEL)
+            return inspect_query(query, _state["corpus"], embedding_name=emb,
+                                 cross_encoder=_state["cross_encoder"])
+        try:
+            return await asyncio.to_thread(_run)
+        except Exception as e:
+            return JSONResponse({"error": f"Inspect failed: {e}"}, status_code=502)
 
 
 @app.post("/api/ask")
@@ -99,7 +398,6 @@ async def ask(req: AskRequest, response: Response, sid: str | None = Cookie(defa
     if len(question) > 2000:
         return JSONResponse({"error": "Question too long (max 2000 chars)."}, status_code=400)
 
-    # Per-browser session for multi-user memory.
     if not sid:
         sid = str(uuid.uuid4())
         response.set_cookie("sid", sid, max_age=60 * 60 * 24, httponly=True, samesite="lax")
@@ -107,37 +405,31 @@ async def ask(req: AskRequest, response: Response, sid: str | None = Cookie(defa
     crag_app = _state["crag_app"]
     condenser = _state["condenser"]
 
-    # 1. Condense the follow-up against history (conversational RAG).
     history = memory.history_as_text(sid, limit=6)
     standalone = question
     if history:
         try:
-            standalone = await asyncio.to_thread(
-                condenser.invoke, {"history": history, "question": question}
-            )
-            standalone = standalone.strip()
+            standalone = (await asyncio.to_thread(
+                condenser.invoke, {"history": history, "question": question})).strip()
         except Exception:
-            standalone = question  # condensing is best-effort
+            standalone = question
 
-    # 2. Run the Corrective-RAG graph (blocking) in a worker thread, rate-limited.
     async with _semaphore:
         try:
             result = await asyncio.to_thread(
                 crag_app.invoke,
                 {"question": standalone, "documents": [], "generation": "", "used_web_search": False},
             )
-        except Exception as e:  # surface a clean error, don't 500 the UI
+        except Exception as e:
             return JSONResponse({"error": f"Generation failed: {e}"}, status_code=502)
 
     answer = result.get("generation", "")
     used_web = bool(result.get("used_web_search"))
     docs = result.get("documents", [])
 
-    # 3. Persist the turn (multi-user safe).
     memory.add_message(sid, "user", question)
     memory.add_message(sid, "assistant", answer)
 
-    # 4. Dedup sources to the top-N for display.
     sources, seen = [], set()
     for s in format_sources(docs, top_n=10):
         key = (s["title"], s["page"])
@@ -153,4 +445,5 @@ async def ask(req: AskRequest, response: Response, sid: str | None = Cookie(defa
         "used_web_search": used_web,
         "standalone_question": standalone if standalone != question else None,
         "sources": sources,
+        "config": {"embedding": _state["embedding"], "strategy": _state["strategy"]},
     }

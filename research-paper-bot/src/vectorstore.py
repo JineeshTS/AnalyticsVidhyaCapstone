@@ -38,6 +38,20 @@ def build_vectorstore(
     return store
 
 
+def add_to_vectorstore(
+    chunks: List[Document], embedding_name: str = config.DEFAULT_EMBEDDING
+) -> Chroma:
+    """Append chunks to an existing collection (used for live document uploads)."""
+    store = load_vectorstore(embedding_name)
+    if chunks:
+        store.add_documents(chunks)
+    return store
+
+
+def has_vectorstore(embedding_name: str) -> bool:
+    return Path(_persist_dir(embedding_name)).exists()
+
+
 def load_vectorstore(embedding_name: str = config.DEFAULT_EMBEDDING) -> Chroma:
     """Load an already-built Chroma collection."""
     persist_dir = _persist_dir(embedding_name)
