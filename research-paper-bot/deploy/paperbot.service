@@ -1,23 +1,27 @@
-# systemd unit to run the Chainlit app as a service.
-# Edit the paths/user, then:
+# systemd unit to run the FastAPI web app as a service.
 #   sudo cp deploy/paperbot.service /etc/systemd/system/paperbot.service
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now paperbot
+#   sudo systemctl daemon-reload && sudo systemctl enable --now paperbot
 #   sudo systemctl status paperbot      # check it's running
 #   journalctl -u paperbot -f           # follow logs
 
 [Unit]
-Description=Research Paper Answer Bot (Chainlit)
-After=network.target
+Description=Research Paper Answer Bot (FastAPI web app)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
+# Runs as root so the local `claude` CLI can read /root/.claude OAuth creds.
 User=root
-WorkingDirectory=/opt/research-paper-bot
-Environment="PATH=/opt/research-paper-bot/.venv/bin"
-ExecStart=/opt/research-paper-bot/.venv/bin/chainlit run app.py --host 0.0.0.0 --port 8000 --headless
+WorkingDirectory=/root/AnalyticsVidhyaCapstone/extracted/research-paper-bot
+# Make the `claude` binary reachable from the service PATH.
+Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HF_HOME=/root/.cache/huggingface
+Environment=TOKENIZERS_PARALLELISM=false
+ExecStart=/root/AnalyticsVidhyaCapstone/extracted/research-paper-bot/.venv/bin/uvicorn webapp:app --host 127.0.0.1 --port 8011
 Restart=on-failure
 RestartSec=5
+TimeoutStartSec=120
 
 [Install]
 WantedBy=multi-user.target

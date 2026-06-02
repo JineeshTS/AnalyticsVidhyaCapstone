@@ -109,6 +109,20 @@ chainlit run app.py -w
 chainlit run app.py --host 0.0.0.0 --port 8000
 ```
 
+### Web app (FastAPI)
+
+A second, brandable UI (`webapp.py` + `web/index.html`) wraps the same
+Corrective-RAG pipeline behind a `/api/ask` endpoint — built once at startup,
+concurrency-capped so a public URL can't drain the LLM quota.
+
+```bash
+uvicorn webapp:app --host 127.0.0.1 --port 8011      # then open http://127.0.0.1:8011
+```
+
+For a persistent public deployment behind nginx, see `deploy/paperbot.service`
+(systemd) and `deploy/paperbot.nginx.conf` (TLS + Basic-Auth gate + rate limits).
+A live instance runs at **https://paperbot.ganakys.com** (access-gated).
+
 ## Compare and choose the best approach
 
 ```bash
