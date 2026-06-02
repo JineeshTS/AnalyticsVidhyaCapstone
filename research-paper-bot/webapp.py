@@ -235,6 +235,9 @@ def corpus() -> dict:
     embeddings = [{"name": n, "label": s["label"], "ready": has_vectorstore(n)}
                   for n, s in config.EMBEDDING_MODELS.items()]
     docs = _doc_summary(_state.get("corpus", []))
+    original = _state.get("original_sources") or set()
+    for d in docs:
+        d["uploaded"] = d["source"] not in original
     return {
         "documents": docs,
         "total_docs": len(docs),

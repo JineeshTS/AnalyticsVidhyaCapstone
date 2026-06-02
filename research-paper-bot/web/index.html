@@ -121,6 +121,8 @@
   .doclist{margin-top:15px;display:flex;flex-direction:column;gap:7px}
   .doc{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 13px;font-size:13px}
   .doc .ttl{font-weight:600}.doc .c{margin-left:auto;color:var(--muted);font-size:12px}
+  .upbadge{font-size:9.5px;color:var(--good);border:1px solid var(--good);border-radius:10px;padding:1px 7px;margin-left:8px}
+  .origbadge{font-size:9.5px;color:var(--faint);border:1px solid var(--line);border-radius:10px;padding:1px 7px;margin-left:8px}
   .steps{margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:14px;display:none}
   .steps.show{display:block}
   .step{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px;color:var(--muted)}
@@ -327,7 +329,7 @@ async function loadCorpus(){
   const d=await (await fetch('/api/corpus')).json();
   $('#corpusTotals').textContent=d.total_docs+' docs · '+d.total_chunks+' chunks';
   $('#mCorpus').textContent=d.total_docs+' docs · '+d.total_chunks+' chunks';
-  $('#doclist').innerHTML=d.documents.map(x=>`<div class="doc"><span class="ttl">${esc(x.title)}</span><span class="c">${x.chunks} chunks</span></div>`).join('');
+  $('#doclist').innerHTML=d.documents.map(x=>`<div class="doc ${x.uploaded?'new':''}"><span class="ttl">${esc(x.title)}</span>${x.uploaded?'<span class="upbadge">⬆ uploaded</span>':'<span class="origbadge">original</span>'}<span class="c">${x.chunks} chunks</span></div>`).join('');
 }
 const drop=$('#drop'),fileInput=$('#fileInput');
 drop.onclick=()=>fileInput.click();
