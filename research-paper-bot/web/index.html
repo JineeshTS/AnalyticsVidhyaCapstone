@@ -120,9 +120,15 @@
   .drop.over{border-color:var(--accent);background:var(--panel2);color:var(--text)}
   .doclist{margin-top:15px;display:flex;flex-direction:column;gap:7px}
   .doc{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 13px;font-size:13px}
-  .doc .ttl{font-weight:600}.doc .c{margin-left:auto;color:var(--muted);font-size:12px}
+  .doc{cursor:pointer}.doc .ttl{font-weight:600}.doc .c{margin-left:auto;color:var(--muted);font-size:12px}
+  .doc .chev{color:var(--faint);font-size:11px;transition:.15s}
   .upbadge{font-size:9.5px;color:var(--good);border:1px solid var(--good);border-radius:10px;padding:1px 7px;margin-left:8px}
   .origbadge{font-size:9.5px;color:var(--faint);border:1px solid var(--line);border-radius:10px;padding:1px 7px;margin-left:8px}
+  .chunks{margin:4px 0 10px;padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:9px}
+  .chunks .meta{font-size:11.5px;color:var(--muted);margin-bottom:8px}
+  .chunk{background:var(--panel3);border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-bottom:7px}
+  .chunk .ch{display:flex;gap:8px;font-size:10.5px;color:var(--faint);margin-bottom:4px;font-family:ui-monospace,monospace}
+  .chunk .ct{font-size:11.5px;color:var(--muted);line-height:1.45;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;max-height:140px;overflow:auto}
   .steps{margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:14px;display:none}
   .steps.show{display:block}
   .step{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px;color:var(--muted)}
@@ -329,7 +335,24 @@ async function loadCorpus(){
   const d=await (await fetch('/api/corpus')).json();
   $('#corpusTotals').textContent=d.total_docs+' docs · '+d.total_chunks+' chunks';
   $('#mCorpus').textContent=d.total_docs+' docs · '+d.total_chunks+' chunks';
-  $('#doclist').innerHTML=d.documents.map(x=>`<div class="doc ${x.uploaded?'new':''}"><span class="ttl">${esc(x.title)}</span>${x.uploaded?'<span class="upbadge">⬆ uploaded</span>':'<span class="origbadge">original</span>'}<span class="c">${x.chunks} chunks</span></div>`).join('');
+  $('#doclist').innerHTML=d.documents.map(x=>
+    `<div class="doc ${x.uploaded?'new':''}" onclick="toggleChunks('${encodeURIComponent(x.source)}',this)">`+
+    `<span class="chev">▸</span><span class="ttl">${esc(x.title)}</span>`+
+    `${x.uploaded?'<span class="upbadge">⬆ uploaded</span>':'<span class="origbadge">original</span>'}`+
+    `<span class="c">${x.chunks} chunks · view ▾</span></div>`).join('');
+}
+async function toggleChunks(srcEnc,row){
+  const next=row.nextElementSibling;
+  if(next&&next.classList.contains('chunks')){next.remove();row.querySelector('.chev').textContent='▸';return;}
+  row.querySelector('.chev').textContent='▾';
+  const box=document.createElement('div');box.className='chunks';box.innerHTML='<div class="meta">Loading chunks…</div>';
+  row.after(box);
+  try{
+    const d=await (await fetch('/api/chunks?source='+srcEnc)).json();
+    if(d.error){box.innerHTML='<div class="meta err">'+esc(d.error)+'</div>';return;}
+    box.innerHTML=`<div class="meta">${d.count} chunks · RecursiveCharacterTextSplitter (chunk_size ${d.chunk_size}, overlap ${d.chunk_overlap}). See <a href="#" onclick="showTab('code');setTimeout(()=>{const f=document.querySelector('.file[data-p=\\'src/ingest.py\\']');if(f)f.click();},200);return false;">src/ingest.py</a>.</div>`+
+      d.chunks.map(c=>`<div class="chunk"><div class="ch"><span>#${c.index}</span><span>page ${esc(c.page)}</span><span>${c.chars} chars</span></div><div class="ct">${esc(c.text)}</div></div>`).join('');
+  }catch(e){box.innerHTML='<div class="meta err">Failed to load chunks</div>';}
 }
 const drop=$('#drop'),fileInput=$('#fileInput');
 drop.onclick=()=>fileInput.click();
