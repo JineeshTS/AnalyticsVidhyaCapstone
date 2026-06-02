@@ -70,6 +70,19 @@ def build_corpus(data_dir: Path = config.DATA_DIR) -> List[Document]:
     return chunks
 
 
+def load_single_pdf(path: Path) -> List[Document]:
+    """Load + chunk one PDF (used for live uploads). Same metadata as load_pdfs."""
+    path = Path(path)
+    title = _clean_title(path)
+    pages: List[Document] = []
+    for page_doc in PyMuPDFLoader(str(path)).load():
+        page_doc.metadata["title"] = title
+        page_doc.metadata["source"] = path.name
+        page_doc.metadata["page_number"] = page_doc.metadata.get("page", 0) + 1
+        pages.append(page_doc)
+    return chunk_documents(pages)
+
+
 if __name__ == "__main__":
     corpus = build_corpus()
     print(f"Loaded and chunked {len(corpus)} chunks.")
