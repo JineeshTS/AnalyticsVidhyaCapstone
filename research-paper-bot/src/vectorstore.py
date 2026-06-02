@@ -52,6 +52,23 @@ def has_vectorstore(embedding_name: str) -> bool:
     return Path(_persist_dir(embedding_name)).exists()
 
 
+def collection_stats(embedding_name: str) -> dict:
+    """Read vector count + dimension straight from the persisted Chroma
+    collection (no embedding model load) — concrete proof of what's indexed."""
+    import chromadb
+
+    try:
+        client = chromadb.PersistentClient(path=_persist_dir(embedding_name))
+        col = client.get_collection(_collection_name(embedding_name))
+        count = col.count()
+        sample = col.get(limit=1, include=["embeddings"])
+        embs = sample.get("embeddings")  # may be a numpy array — avoid bool coercion
+        dim = len(embs[0]) if embs is not None and len(embs) > 0 else None
+        return {"collection": _collection_name(embedding_name), "vectors": count, "dim": dim}
+    except Exception:
+        return {"collection": _collection_name(embedding_name), "vectors": None, "dim": None}
+
+
 def load_vectorstore(embedding_name: str = config.DEFAULT_EMBEDDING) -> Chroma:
     """Load an already-built Chroma collection."""
     persist_dir = _persist_dir(embedding_name)

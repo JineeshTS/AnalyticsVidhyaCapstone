@@ -476,10 +476,12 @@ async function runInspect(){
 async function loadStack(){
   const d=await (await fetch('/api/info')).json();const cards=[];
   cards.push(card('LLM',d.llm.label,d.llm.role,'',[['act','active']],true));
-  d.embeddings.forEach(e=>cards.push(card('Embedding · '+e.name,e.model,e.label,'',
-    [[e.type==='commercial'?'com':'os',e.type],...(e.active?[['act','active']]:[])],e.active)));
+  d.embeddings.forEach(e=>{const note=e.label+(e.vectors!=null?` — indexed: ${e.vectors} vectors · ${e.dim}-dim in Chroma`:(e.ready?'':' (not built)'));
+    cards.push(card('Embedding · '+e.name,e.model,note,'',
+    [[e.type==='commercial'?'com':'os',e.type],...(e.active?[['act','active']]:[])],e.active));});
   cards.push(card('Reranker',d.reranker.model,d.reranker.role,'',[['os','open-source'],...(d.reranker.active?[['act','active']]:[])],d.reranker.active));
-  cards.push(card('Vector DB',d.vector_db.name,d.vector_db.note));
+  const cols=(d.vector_db.collections||[]).map(c=>`${c.name}: ${c.vectors} vectors × ${c.dim}-dim`).join(' · ');
+  cards.push(card('Vector DB',d.vector_db.name,d.vector_db.note+(cols?(' — '+cols):'')));
   cards.push(card('Keyword',d.keyword.name,d.keyword.note));
   cards.push(card('Web search',d.web_search.name,d.web_search.note));
   cards.push(card('Orchestration',d.orchestration.name,d.orchestration.note));

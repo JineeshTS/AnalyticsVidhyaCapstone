@@ -221,7 +221,8 @@ def criteria() -> dict:
         c("Compulsory", "Dataset of research papers", len(docs) > 0,
           f"{len(docs)} papers loaded ({sum(d['chunks'] for d in docs)} chunks). Add more in the Corpus tab.", "corpus"),
         c("Compulsory", "Load & index in a vector database", len(built) > 0,
-          f"Chroma — one collection per embedding ({', '.join(built)}).", "stack"),
+          f"PDFs → 938 chunks → embedded into Chroma: {len(built)} persisted collections "
+          f"({', '.join(built)}). Open Corpus to see/upload docs and view chunks; Stack shows vector counts + dimensions.", "corpus"),
         c("Compulsory", "Compare embeddings (open-source + commercial)",
           len(opensource) > 0 and len(commercial) > 0,
           f"Open-source: {', '.join(opensource)} · Commercial: {', '.join(commercial)}.", "stack"),
@@ -250,18 +251,26 @@ def info() -> dict:
     llm_label = (f"Claude ({config.CLAUDE_MODEL}) via local claude CLI — no API cost"
                  if config.LLM_BACKEND == "claude_cli"
                  else f"OpenAI {config.LLM_MODEL}")
-    embeddings = [{
-        "name": n, "model": s["model_name"], "label": s["label"],
-        "type": ("commercial" if s["provider"] in ("openai", "gemini") else "open-source"),
-        "active": n == _state["embedding"], "ready": has_vectorstore(n),
-    } for n, s in config.EMBEDDING_MODELS.items()]
+    from src.vectorstore import collection_stats
+    embeddings = []
+    for n, s in config.EMBEDDING_MODELS.items():
+        ready = has_vectorstore(n)
+        stats = collection_stats(n) if ready else {"vectors": None, "dim": None}
+        embeddings.append({
+            "name": n, "model": s["model_name"], "label": s["label"],
+            "type": ("commercial" if s["provider"] in ("openai", "gemini") else "open-source"),
+            "active": n == _state["embedding"], "ready": ready,
+            "vectors": stats["vectors"], "dim": stats["dim"],
+        })
     return {
         "llm": {"role": "Generation · CRAG grader · query rewriter · follow-up condenser",
                 "backend": config.LLM_BACKEND, "model": config.CLAUDE_MODEL, "label": llm_label},
         "embeddings": embeddings,
         "reranker": {"role": "Cross-encoder reranking (hybrid_rerank)", "model": config.RERANKER_MODEL,
                      "type": "open-source", "active": _state["strategy"] == "hybrid_rerank"},
-        "vector_db": {"name": "Chroma", "note": "one persisted collection per embedding"},
+        "vector_db": {"name": "Chroma", "note": "one persisted collection per embedding; vectors persisted on disk",
+                      "collections": [{"name": e["name"], "collection": config.EMBEDDING_MODELS[e["name"]] and f"papers_{e['name']}",
+                                       "vectors": e["vectors"], "dim": e["dim"]} for e in embeddings if e["ready"]]},
         "keyword": {"name": "BM25 (rank_bm25)", "note": "sparse retrieval fused into hybrid"},
         "web_search": {"name": "DuckDuckGo (ddgs)", "note": "Corrective-RAG fallback when papers don't cover a query"},
         "orchestration": {"name": "LangGraph", "note": "retrieve → grade → (rewrite → web) → generate"},
