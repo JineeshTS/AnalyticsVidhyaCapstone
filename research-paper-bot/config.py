@@ -78,6 +78,24 @@ EMBEDDING_MODELS = {
 # Default embedding model used by the app/index builder.
 DEFAULT_EMBEDDING = os.getenv("DEFAULT_EMBEDDING", "bge")
 
+# Human-friendly display titles for the seminal papers (keyed by source filename).
+# Used only for presentation so sources read as papers, not filenames — e.g. the
+# "GPT-3" paper shows as a citation, not "GPT 3 Language Models Few Shot". Uploaded
+# PDFs fall back to their cleaned filename via display_title().
+PAPER_TITLES = {
+    "Attention_Is_All_You_Need.pdf": "Attention Is All You Need (Vaswani et al., 2017)",
+    "BERT.pdf": "BERT (Devlin et al., 2018)",
+    "GPT-3_Language_Models_Few_Shot.pdf": "GPT-3: Language Models are Few-Shot Learners (Brown et al., 2020)",
+    "RAG_Retrieval_Augmented_Generation.pdf": "RAG: Retrieval-Augmented Generation (Lewis et al., 2020)",
+    "Chain_of_Thought_Prompting.pdf": "Chain-of-Thought Prompting (Wei et al., 2022)",
+    "InstructGPT_Training_with_Human_Feedback.pdf": "InstructGPT: Training LMs to follow instructions with human feedback (Ouyang et al., 2022)",
+}
+
+
+def display_title(source: str, fallback: str = "") -> str:
+    """Nice presentation title for a source filename; falls back for uploads."""
+    return PAPER_TITLES.get(source, fallback or source or "Unknown")
+
 # Cross-encoder reranker (open-source, runs on CPU).
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
 

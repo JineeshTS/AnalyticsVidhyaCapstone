@@ -39,7 +39,7 @@ def format_context(docs: List[Document]) -> str:
     """Render retrieved chunks into a numbered context block for the prompt."""
     blocks = []
     for i, d in enumerate(docs, 1):
-        title = d.metadata.get("title", "Unknown")
+        title = config.display_title(d.metadata.get("source", ""), d.metadata.get("title", "Unknown"))
         page = d.metadata.get("page_number", "?")
         blocks.append(f"[{i}] (from '{title}', page {page})\n{d.page_content}")
     return "\n\n".join(blocks)
@@ -51,7 +51,7 @@ def format_sources(docs: List[Document], top_n: int = config.TOP_SOURCES) -> Lis
     for d in docs[:top_n]:
         sources.append(
             {
-                "title": d.metadata.get("title", "Unknown"),
+                "title": config.display_title(d.metadata.get("source", ""), d.metadata.get("title", "Unknown")),
                 "page": d.metadata.get("page_number", "?"),
                 "source": d.metadata.get("source", ""),
                 "snippet": d.page_content[:300].strip(),
