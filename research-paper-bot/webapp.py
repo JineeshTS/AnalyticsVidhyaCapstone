@@ -280,6 +280,30 @@ def source_file(path: str) -> dict:
             "content": content}
 
 
+@app.get("/api/chunks")
+def chunks(source: str) -> dict:
+    """Return the actual chunks for a document — what chunking produced."""
+    items = []
+    for d in _state.get("corpus", []):
+        if d.metadata.get("source") == source:
+            items.append({
+                "index": len(items) + 1,
+                "page": d.metadata.get("page_number", "?"),
+                "chars": len(d.page_content),
+                "text": d.page_content,
+            })
+    if not items:
+        return JSONResponse({"error": "Document not found."}, status_code=404)
+    return {
+        "source": source,
+        "title": config.display_title(source, source),
+        "count": len(items),
+        "chunk_size": config.CHUNK_SIZE,
+        "chunk_overlap": config.CHUNK_OVERLAP,
+        "chunks": items,
+    }
+
+
 @app.post("/api/config")
 async def set_config(req: ConfigRequest) -> dict:
     new_emb = req.embedding or _state["embedding"]
