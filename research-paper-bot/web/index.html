@@ -237,11 +237,12 @@
     <!-- INSPECTOR -->
     <section class="tab" id="tab-inspect"><div class="wrap">
       <h2>Retrieval Inspector</h2>
-      <p class="sub">Every retrieval stage for a query. Watch a chunk move between <b>Hybrid</b> and <b>Reranked</b> — that cross-encoder rescoring is how the reranker works. Green = survives into the final top-3.</p>
+      <p class="sub"><b>Inspect strategies</b>: dense → BM25 → hybrid → reranked for one embedding (watch chunks move between Hybrid and Reranked — that's the cross-encoder; green = final top-3). <b>Compare embeddings</b>: the same query through every embedding (open-source vs commercial) side by side.</p>
       <div class="row">
         <input id="iq" class="txt" placeholder="e.g. What problem do positional encodings solve?" style="flex:1" />
         <label class="sub" style="margin:0">Embedding <select id="iEmb"></select></label>
-        <button class="primary" id="iBtn" onclick="runInspect()">Inspect</button></div>
+        <button class="primary" id="iBtn" onclick="runInspect()">Inspect strategies</button>
+        <button class="btn" id="ceBtn" onclick="runCompare()">⇄ Compare embeddings</button></div>
       <div class="cols" id="icols"></div>
     </div></section>
 
@@ -470,6 +471,21 @@ async function runInspect(){
         items.slice(0,6).map(it=>`<div class="cand ${it.kept?'kept':''}"><div class="h"><span class="nm">#${it.rank} ${esc(it.title.slice(0,20))}${it.kept?'<span class="keptpill">KEPT</span>':''}</span><span class="sc">${it.score!=null?it.score:'—'}</span></div><div class="pg">page ${esc(it.page)}</div><div class="sn">${esc(it.snippet)}</div></div>`).join('');
       cols.appendChild(c);});
   }catch(e){cols.innerHTML='<p class="err">Network error</p>';}finally{$('#iBtn').disabled=false;}
+}
+async function runCompare(){
+  const q=$('#iq').value.trim();if(!q)return;const cols=$('#icols');$('#ceBtn').disabled=true;
+  cols.innerHTML='<p class="sub">Embedding the query with each model & retrieving…</p>';
+  try{
+    const d=await (await fetch('/api/compare_embeddings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})})).json();
+    if(d.error){cols.innerHTML='<p class="err">'+esc(d.error)+'</p>';return;}
+    cols.innerHTML='';
+    d.embeddings.forEach(e=>{
+      const c=document.createElement('div');c.className='col';
+      c.innerHTML=`<h3>${esc(e.name)} <span class="tag ${e.type==='commercial'?'com':'os'}">${e.type}</span></h3>`+
+        `<div class="desc">${esc(e.model)}<br>${e.vectors} vectors · ${e.dim}-dim</div>`+
+        e.results.map(it=>`<div class="cand"><div class="h"><span class="nm">#${it.rank} ${esc(it.title.slice(0,20))}</span><span class="sc">${it.score}</span></div><div class="pg">page ${esc(it.page)}</div><div class="sn">${esc(it.snippet)}</div></div>`).join('');
+      cols.appendChild(c);});
+  }catch(e){cols.innerHTML='<p class="err">Network error</p>';}finally{$('#ceBtn').disabled=false;}
 }
 
 // stack

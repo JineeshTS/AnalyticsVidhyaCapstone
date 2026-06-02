@@ -225,7 +225,8 @@ def criteria() -> dict:
           f"({', '.join(built)}). Open Corpus to see/upload docs and view chunks; Stack shows vector counts + dimensions.", "corpus"),
         c("Compulsory", "Compare embeddings (open-source + commercial)",
           len(opensource) > 0 and len(commercial) > 0,
-          f"Open-source: {', '.join(opensource)} · Commercial: {', '.join(commercial)}.", "stack"),
+          f"Open-source ({', '.join(opensource)}) + commercial ({', '.join(commercial)}). "
+          f"Inspector → 'Compare embeddings' runs one query through all three side by side; the evaluation table below scores each.", "inspect"),
         c("Compulsory", "Compare retrieval strategies (cosine → hybrid → reranker)", True,
           "dense / hybrid (dense+BM25) / hybrid_rerank (cross-encoder) — see them side-by-side.", "inspect"),
         c("Compulsory", "Vector DB connected to an LLM (RAG pipeline)", True,
@@ -463,6 +464,43 @@ async def inspect(req: InspectRequest) -> dict:
             return await asyncio.to_thread(_run)
         except Exception as e:
             return JSONResponse({"error": f"Inspect failed: {e}"}, status_code=502)
+
+
+@app.post("/api/compare_embeddings")
+async def compare_embeddings(req: InspectRequest) -> dict:
+    """Run the SAME query through each built embedding (dense retrieval) so the
+    evaluator can see open-source vs commercial embeddings side by side."""
+    query = (req.query or "").strip()
+    if not query:
+        return JSONResponse({"error": "Empty query."}, status_code=400)
+
+    async with _semaphore:
+        def _run():
+            from src.vectorstore import load_vectorstore, collection_stats
+            cols = []
+            for n, s in config.EMBEDDING_MODELS.items():
+                if not has_vectorstore(n):
+                    continue
+                store = load_vectorstore(n)
+                pairs = store.similarity_search_with_relevance_scores(query, k=5)
+                stats = collection_stats(n)
+                cols.append({
+                    "name": n, "model": s["model_name"],
+                    "type": "commercial" if s["provider"] in ("openai", "gemini") else "open-source",
+                    "dim": stats["dim"], "vectors": stats["vectors"],
+                    "results": [{
+                        "rank": i + 1,
+                        "title": config.display_title(d.metadata.get("source", ""), d.metadata.get("title", "Unknown")),
+                        "page": d.metadata.get("page_number", "?"),
+                        "score": round(float(sc), 4),
+                        "snippet": d.page_content[:160].strip().replace("\n", " "),
+                    } for i, (d, sc) in enumerate(pairs)],
+                })
+            return {"query": query, "embeddings": cols}
+        try:
+            return await asyncio.to_thread(_run)
+        except Exception as e:
+            return JSONResponse({"error": f"Compare failed: {e}"}, status_code=502)
 
 
 @app.post("/api/ask")
