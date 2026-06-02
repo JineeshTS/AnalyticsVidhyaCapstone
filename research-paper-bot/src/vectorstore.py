@@ -1,0 +1,54 @@
+"""
+Vector store management (Chroma).
+
+We keep one persistent Chroma collection per embedding model so the embedding
+comparison can be run without re-indexing or models clobbering each other.
+"""
+
+from pathlib import Path
+from typing import List
+
+from langchain_chroma import Chroma
+from langchain_core.documents import Document
+
+import config
+from src.embeddings import get_embeddings
+
+
+def _persist_dir(embedding_name: str) -> str:
+    """Each embedding model gets its own on-disk directory."""
+    return str(Path(config.CHROMA_DIR) / embedding_name)
+
+
+def _collection_name(embedding_name: str) -> str:
+    return f"papers_{embedding_name}"
+
+
+def build_vectorstore(
+    chunks: List[Document], embedding_name: str = config.DEFAULT_EMBEDDING
+) -> Chroma:
+    """(Re)build and persist a Chroma collection for the given embedding model."""
+    embeddings = get_embeddings(embedding_name)
+    store = Chroma.from_documents(
+        documents=chunks,
+        embedding=embeddings,
+        persist_directory=_persist_dir(embedding_name),
+        collection_name=_collection_name(embedding_name),
+    )
+    return store
+
+
+def load_vectorstore(embedding_name: str = config.DEFAULT_EMBEDDING) -> Chroma:
+    """Load an already-built Chroma collection."""
+    persist_dir = _persist_dir(embedding_name)
+    if not Path(persist_dir).exists():
+        raise FileNotFoundError(
+            f"No vector store for '{embedding_name}' at {persist_dir}. "
+            f"Run: python build_index.py --embedding {embedding_name}"
+        )
+    embeddings = get_embeddings(embedding_name)
+    return Chroma(
+        persist_directory=persist_dir,
+        embedding_function=embeddings,
+        collection_name=_collection_name(embedding_name),
+    )

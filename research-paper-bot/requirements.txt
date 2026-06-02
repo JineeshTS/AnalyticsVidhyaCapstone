@@ -1,0 +1,33 @@
+# ===========================================================================
+# Research Paper Answer Bot -- dependencies
+#
+# The versions below the line marked "VERIFIED" were installed and import-tested
+# together in the build sandbox (Python 3.12). The HuggingFace / torch block
+# could not be installed in the sandbox (disk limit) but is a standard install
+# on the VPS; version ranges are chosen to stay compatible with langchain-core
+# 0.3.x. If pip reports a resolver conflict for langchain-huggingface, let pip
+# pick a version compatible with langchain-core>=0.3,<0.4.
+# ===========================================================================
+
+# ---- VERIFIED (installed + imported together) ----
+langchain==0.3.30
+langchain-core==0.3.86
+langchain-community==0.3.31
+langchain-text-splitters==0.3.11
+langchain-openai==0.3.35
+langchain-chroma==0.2.6
+langgraph==0.6.11
+chromadb==1.5.9
+openai==2.38.0
+chainlit==2.11.1
+rank-bm25==0.2.2
+PyMuPDF==1.27.2.3
+ddgs==9.14.4
+python-dotenv==1.2.2
+pydantic==2.13.4
+
+# ---- HuggingFace / torch stack (install on the VPS) ----
+# Open-source embeddings (MiniLM, BGE) + cross-encoder reranker run here.
+langchain-huggingface>=0.1.0,<0.2.0
+sentence-transformers>=3.0.0
+# torch CPU wheel is pulled automatically by sentence-transformers.

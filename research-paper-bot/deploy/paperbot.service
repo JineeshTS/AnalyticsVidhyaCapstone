@@ -1,0 +1,23 @@
+# systemd unit to run the Chainlit app as a service.
+# Edit the paths/user, then:
+#   sudo cp deploy/paperbot.service /etc/systemd/system/paperbot.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now paperbot
+#   sudo systemctl status paperbot      # check it's running
+#   journalctl -u paperbot -f           # follow logs
+
+[Unit]
+Description=Research Paper Answer Bot (Chainlit)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/research-paper-bot
+Environment="PATH=/opt/research-paper-bot/.venv/bin"
+ExecStart=/opt/research-paper-bot/.venv/bin/chainlit run app.py --host 0.0.0.0 --port 8000 --headless
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
