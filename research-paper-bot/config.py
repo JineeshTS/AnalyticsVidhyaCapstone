@@ -119,6 +119,10 @@ RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "3"))  # kept after reranking
 # Retrieval strategy: "dense" | "hybrid" | "hybrid_rerank"
 DEFAULT_STRATEGY = os.getenv("DEFAULT_STRATEGY", "hybrid_rerank")
 
+# CRAG relevance grading: how many chunks to grade in parallel (each grade is one
+# LLM call). Higher = faster grading but more concurrent `claude` subprocesses.
+GRADE_CONCURRENCY = int(os.getenv("GRADE_CONCURRENCY", "8"))
+
 # ---------------------------------------------------------------------------
 # Web search (Corrective RAG fallback)
 # ---------------------------------------------------------------------------

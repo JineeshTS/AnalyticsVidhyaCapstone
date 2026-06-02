@@ -12,6 +12,7 @@ back to a live web search instead of confidently answering from weak context.
 """
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, TypedDict
 
 from langchain_core.documents import Document
@@ -102,15 +103,31 @@ def _make_nodes(retriever: BaseRetriever, strategy: str, embedding_name: str):
 
     def grade_documents(state: CRAGState) -> CRAGState:
         t = time.perf_counter()
-        kept, dropped = [], []
-        for d in state["documents"]:
-            score = grader.invoke({"document": d.page_content, "question": state["question"]})
-            (kept if score.binary_score.strip().lower() == "yes" else dropped).append(d)
+        docs = state["documents"]
+        question = state["question"]
+
+        def grade_one(d: Document) -> bool:
+            try:
+                score = grader.invoke({"document": d.page_content, "question": question})
+                return score.binary_score.strip().lower() == "yes"
+            except Exception:
+                return True  # fail-open: keep the chunk if the grader errors
+
+        # Grade all chunks concurrently — each grade is one LLM call.
+        if docs:
+            workers = min(len(docs), config.GRADE_CONCURRENCY)
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                verdicts = list(ex.map(grade_one, docs))
+        else:
+            verdicts = []
+        kept = [d for d, v in zip(docs, verdicts) if v]
+        dropped = [d for d, v in zip(docs, verdicts) if not v]
+
         decision = ("At least one chunk is relevant → answer from the papers."
                     if kept else "No chunk is relevant → fall back to a live web search.")
         evs = [
             {"step": "grade", "label": "2 · Grade relevance",
-             "detail": f"An LLM graded each chunk; kept {len(kept)} of {len(state['documents'])} as actually relevant.",
+             "detail": f"An LLM graded all {len(docs)} chunks in parallel; kept {len(kept)} as actually relevant.",
              "kept": [_label(d) for d in kept], "dropped": [_label(d) for d in dropped],
              "ms": round((time.perf_counter() - t) * 1000)},
             {"step": "decide", "label": "3 · Decision", "detail": decision},
