@@ -40,11 +40,14 @@ from pydantic import BaseModel
 import config
 
 # A guard appended to every system prompt so the CLI behaves like a plain
-# text-completion endpoint rather than an autonomous coding agent.
+# text-completion endpoint rather than an autonomous coding agent. It is kept
+# task-neutral on purpose: it must NOT bias the model toward "answering" (which
+# would break non-Q&A tasks like the follow-up-question rewriter), only forbid
+# tool use and session side-effects.
 _TOOL_GUARD = (
-    "Answer directly using only the information in the user's message. "
-    "Do not use any tools, do not search the web, do not read or write files. "
-    "Respond with the answer text only."
+    "Follow the instructions above exactly and respond with the result only. "
+    "Do not use any tools, do not search the web, do not read or write files, "
+    "and do not ask follow-up questions."
 )
 
 

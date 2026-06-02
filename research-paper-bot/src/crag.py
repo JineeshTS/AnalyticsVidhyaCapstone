@@ -37,10 +37,13 @@ GRADE_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You grade whether a retrieved document is relevant to a user's "
-            "question. If it contains keywords or meaning related to the "
-            "question, grade it 'yes'. Otherwise 'no'. Be lenient -- the goal "
-            "is to filter out clearly irrelevant chunks, not to be strict.",
+            "You grade whether a retrieved document actually helps ANSWER a "
+            "user's question. Grade 'yes' only if the document contains "
+            "information about the specific topic, method, or entity the "
+            "question asks about. Mere keyword overlap is NOT enough: a document "
+            "that shares a few words but is about a different topic must be "
+            "graded 'no'. If the document does not contain information that "
+            "would help answer the question, grade 'no'.",
         ),
         ("human", "Document:\n{document}\n\nQuestion: {question}"),
     ]
