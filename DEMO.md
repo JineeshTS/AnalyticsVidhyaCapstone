@@ -1,9 +1,138 @@
-# Demo Guide — Research Paper Answer Bot
+# Demo Guide — Research Paper Answer Bot (RAG Explorer)
 
-A 5–8 minute walkthrough to present to your mentor. It shows every compulsory
-goal and all three stretch goals, live.
+A 5–8 minute walkthrough that shows **every compulsory goal and all three
+stretch goals**, live — driven almost entirely from the web app itself.
 
-## 0. One‑time setup (before the demo)
+**Live app:** https://paperbot.ganakys.com (HTTP Basic-Auth gated — ask the owner
+for the demo credentials). Runs as a systemd service behind nginx; it's always up.
+
+> Prefer to run it locally? See [§ Local run](#local-run) at the bottom. The
+> tab-by-tab script below is identical either way.
+
+---
+
+## The app at a glance
+
+A dashboard, not a chat box: a left **nav rail**, a large **workspace**, and a
+**docked chat** in the bottom-right that stays visible on every tab.
+
+| Tab | Proves |
+|---|---|
+| ✅ **Criteria** | Live rubric (10/10 capstone goals) + the real `evaluate.py` results table |
+| 📥 **Corpus** | Load & index; **upload a PDF live** and watch chunk → embed → index |
+| 🔍 **Inspector** | The 3 retrieval strategies + **how the reranker works**, with scores |
+| 🧩 **Stack** | Every model in use (LLM, 3 embeddings, reranker, vector DB, web search) |
+| 📄 **Code** | The full source, browsable in-app (read-only, secrets hidden) |
+| 💬 **Chat** (docked) | RAG answers with sources · follow-ups · web-search fallback |
+
+---
+
+## The pitch (30 sec)
+
+> "A RAG system over 6 seminal GenAI papers. It cites its sources, and when the
+> papers don't cover a question it self-corrects and searches the web. The whole
+> LLM layer runs on a **local Claude CLI**, so it costs nothing per query — and
+> the app is fully transparent: you can see the retrieval internals, every model,
+> the evaluation, and all the code, live."
+
+---
+
+## 1. Criteria tab — meet the rubric head-on (1 min)
+
+Open on the **✅ Criteria** tab. It loads a **10/10** scorecard straight from the
+running system (`/api/criteria`), each goal marked met with a one-line *how* and a
+**"Show me →"** button that jumps to the tab that proves it.
+
+Scroll to the **Evaluation results** table (read live from `eval_results.csv`):
+- **`bge` + `hybrid`** is ★ best (4.8/5, lowest latency).
+- Talking point: **hybrid beat plain dense on every embedding**; the **reranker
+  actually hurt** on this small corpus; **open-source `bge` matched commercial
+  Gemini**. That's the "experiment and choose, with evidence" goal — with numbers.
+
+---
+
+## 2. Corpus tab — load, chunk, index, and add a document live (1–2 min)
+
+Shows the indexed documents (6 papers · 938 chunks). Each chunk carries
+`title` + `page_number` — which is what powers source attribution.
+
+**The wow moment:** drag any research PDF onto the drop zone. Watch the live steps:
+*parsed N pages → split into M chunks → embedded + indexed into all 3 vector DBs →
+ready*, with a sample-chunk preview. Then ask about that paper in the docked chat —
+it answers **instantly** with citations. (Hit **↺ Reset** afterward to restore the
+original 6.)
+
+This visibly demonstrates *load files → chunk → embed → index in a vector DB*.
+
+---
+
+## 3. Retrieval Inspector — the heart of the comparison (1–2 min)
+
+Type a query (e.g. *"What problem do positional encodings solve?"*) and hit
+**Inspect**. Four columns appear side-by-side:
+
+- **Dense** — embedding cosine similarity (semantic), with scores.
+- **BM25** — keyword scoring (lexical), with scores.
+- **Hybrid** — the two fused (Reciprocal Rank Fusion).
+- **Reranked** — the cross-encoder rescoring; **green = survives into the final top-3.**
+
+Point at a chunk that moves position between **Hybrid** and **Reranked** — *that*
+reordering is how the reranker works. Switch the embedding dropdown to show the
+comparison is real across models.
+
+---
+
+## 4. Chat (docked, bottom-right) — the three stretch goals in one sequence (2 min)
+
+Run these in order in the chat dock:
+
+1. **In-corpus:** *"What is chain-of-thought prompting?"*
+   → answers from the papers; **source cards** (title + page) appear under the reply.
+2. **Follow-up (conversational RAG):** *"Who introduced it?"*
+   → it shows `↳ <rewritten standalone question>` — resolving "it" against history
+   before retrieving. Each browser session has isolated history (open a second
+   browser/incognito tab to show two independent conversations = **multi-user**).
+3. **Out-of-corpus (corrective RAG):** *"What is the Mamba state-space model from 2023?"*
+   → the reply gets a **🌐 web search** badge and web-link sources. Explain the
+   LangGraph flow: *retrieve → grade → (irrelevant) → rewrite → web search → generate*.
+
+You can also flip the **Embedding / Strategy** dropdowns in the right rail to switch
+the live config (`bge`/`hybrid` is the chosen default).
+
+---
+
+## 5. Stack + Code — maximum transparency (1 min)
+
+- **🧩 Stack** — one card per component: **Claude (sonnet)** as the LLM (via local
+  CLI, no API cost), the three embeddings (active one highlighted, commercial vs
+  open-source tagged), the cross-encoder reranker, Chroma, BM25, DuckDuckGo,
+  LangGraph. Answers "which models are you using?" at a glance.
+- **📄 Code** — the entire project, browsable with syntax highlighting. Open
+  `src/crag.py` (the LangGraph corrective-RAG graph) or `src/claude_llm.py` (the
+  local-CLI LLM backend). Read-only and allowlisted — `.env`/secrets are never served.
+
+---
+
+## Quick answers to likely mentor questions
+
+- **"Why did the reranker do worse?"** Small high-signal corpus; hybrid already
+  surfaces the right chunks, and trimming to top-3 drops context. Rerankers shine
+  on large/noisy corpora. (Show it in the Inspector.)
+- **"How do you stop hallucination?"** The prompt answers only from context; CRAG
+  grades chunks for real answer-relevance and, if none are relevant, web-searches
+  instead of guessing.
+- **"Which models?"** Stack tab: Claude sonnet (LLM), MiniLM + BGE (open-source)
+  + Gemini (commercial) embeddings, BGE cross-encoder reranker.
+- **"Is it multi-user safe?"** Yes — per-session UUID history in SQLite; sessions
+  can't see each other's turns.
+- **"No OpenAI key?"** Correct — `LLM_BACKEND=claude_cli` routes generation through
+  the local Claude CLI at zero per-call cost. Set `LLM_BACKEND=openai` to switch.
+- **"What next?"** Labelled eval set for precision/recall@k; streaming responses;
+  a larger corpus to re-test the reranker.
+
+---
+
+## <a name="local-run"></a>Local run (optional)
 
 ```bash
 cd research-paper-bot
@@ -11,103 +140,24 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt langchain-google-genai
 cp .env.example .env          # set GEMINI_API_KEY; keep LLM_BACKEND=claude_cli
 
-python scripts/download_papers.py        # 6 arXiv papers → data/
-python build_index.py --embedding minilm
+python scripts/download_papers.py            # 6 arXiv papers → data/
+python build_index.py --embedding minilm     # build all three indexes
 python build_index.py --embedding bge
 python build_index.py --embedding gemini
+
+uvicorn webapp:app --host 127.0.0.1 --port 8011   # open http://127.0.0.1:8011
 ```
 
-Pre‑build all three indexes **before** the call — the first build downloads the
-HF embedding + reranker models (a few hundred MB) and you don't want that running
-live. After this, everything is instant.
+Pre-build the indexes **before** demoing — the first build downloads the HF
+embedding + reranker models (a few hundred MB). After that, everything is instant.
 
----
-
-## 1. The pitch (30 sec)
-
-> "A RAG chatbot over 6 seminal GenAI papers. It cites its sources, and when the
-> papers don't cover a question it self‑corrects and searches the web. The whole
-> LLM layer runs on a local Claude CLI, so it costs nothing per query."
-
----
-
-## 2. Show the data + index (1 min) — *compulsory: load & index*
-
+CLI sanity checks (no UI):
 ```bash
-python -m src.ingest
-```
-Point out: **938 chunks** from 6 PDFs, each chunk carrying `title` + `page_number`
-metadata (this is what makes source attribution possible).
-
----
-
-## 3. Basic RAG with sources (1 min) — *compulsory: RAG + show source*
-
-```bash
-python -m src.rag "What is the self-attention mechanism in the Transformer?"
-```
-Point out: the grounded answer **and** the printed **TOP SOURCES** (paper title +
-page). That is the "show the source — top 3" requirement, live.
-
----
-
-## 4. The embedding × strategy comparison (1–2 min) — *compulsory: experiment & choose*
-
-Open `storage/eval_results.csv` (or re‑run `python evaluate.py`) and walk the
-ranked table. Talking points:
-- **hybrid (dense + BM25) wins** — beat plain dense on every embedding.
-- **the reranker actually hurt** on this small corpus — a real, slightly
-  counter‑intuitive finding (it trims to top‑3 and sometimes drops needed context).
-- **open‑source `bge` matched commercial Gemini** — so we ship `bge + hybrid`.
-
-This is the "explore approaches and pick the best, with evidence" part the brief
-emphasises — having a number behind the choice is what mentors look for.
-
----
-
-## 5. The Chainlit app (2–3 min) — *stretch 2: UI · stretch 1: conversational · stretch 3: corrective web search*
-
-```bash
-chainlit run app.py -w        # opens http://localhost:8000
+python -m src.ingest                                   # 938 chunks, with metadata
+python -m src.rag  "What is self-attention?"           # RAG + top-3 sources
+python -m src.crag "What is retrieval augmented generation?"   # corrective RAG
+python evaluate.py                                     # rebuild the results table
 ```
 
-Run these **in order**, in the chat window:
-
-1. **In‑corpus:** *"What is chain‑of‑thought prompting?"*
-   → answers from the papers; expand the **source** elements shown under the reply.
-
-2. **Follow‑up (conversational RAG):** *"Who introduced it?"*
-   → the bot resolves "it" against the previous turn before retrieving. Mention
-   that each browser session has its own isolated history (SQLite) — open a second
-   tab to show two independent conversations (**multi‑user**).
-
-3. **Out‑of‑corpus (corrective RAG):** *"What is the Mamba state‑space model from 2023?"*
-   → the answer is prefixed **🌐 (answered with web search)** and the sources are
-   web links. Explain the LangGraph flow: *retrieve → grade → (irrelevant) →
-   rewrite query → web search → generate*.
-
-That single sequence demonstrates all three stretch goals end‑to‑end.
-
----
-
-## 6. Architecture close (30 sec)
-
-Show `REPORT.md` §3 (the diagram) and make the two design points:
-- **Local Claude CLI backend** (`src/claude_llm.py`) → standard LangChain model,
-  zero per‑call cost, swappable to OpenAI via one env var.
-- **One Chroma collection per embedding** → clean, repeatable comparison.
-
----
-
-## Quick answers to likely mentor questions
-
-- **"Why did the reranker do worse?"** Small high‑signal corpus; hybrid already
-  surfaces the right chunks, and trimming to top‑3 drops context. Rerankers shine
-  on large/noisy corpora.
-- **"How do you stop hallucination?"** The prompt forces answer‑only‑from‑context;
-  CRAG grades chunks and won't answer from weak context — it web‑searches instead.
-- **"Is it multi‑user safe?"** Yes — history is keyed by per‑session UUID in SQLite;
-  sessions can't see each other's turns (verified).
-- **"What would you do next?"** Labelled eval set for precision/recall@k; streaming
-  responses; auth on the web search; larger corpus to re‑test the reranker.
-```
+The legacy Chainlit UI (`chainlit run app.py -w`) still works and also satisfies
+the "build a UI" stretch goal; the FastAPI RAG Explorer is the richer demo surface.

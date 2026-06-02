@@ -49,9 +49,9 @@ chunks.** The page/title metadata is what powers the "show the source" requireme
 ## 3. Architecture
 
 ```
-                 ┌──────────── Chainlit UI (app.py) ────────────┐
- user ──▶ browser│  per-session id · SQLite history · condenser │
-                 └───────────────────────┬──────────────────────┘
+                 ┌─ RAG Explorer web app (webapp.py) · Chainlit (app.py) ─┐
+ user ──▶ browser│  per-session id · SQLite history · condenser           │
+                 └───────────────────────┬───────────────────────────────┘
                                           │ standalone question
                                           ▼
                  ┌──────── Corrective RAG graph (src/crag.py, LangGraph) ───────┐
@@ -111,6 +111,26 @@ Every answer returns the **top‑3 context chunks** with paper title + page numb
 and the prompt instructs the model to answer *only* from the provided context and
 cite paper titles inline.
 
+### 3.5 RAG Explorer web app (`webapp.py` + `web/index.html`)
+
+A FastAPI app turns the pipeline into a transparent, demo‑ready **RAG Explorer**
+(dashboard layout: nav rail + workspace + a docked chat). It's the primary demo
+surface and is deployed live (see §9). Six surfaces:
+
+| Surface | Endpoint(s) | What it shows |
+|---|---|---|
+| **Criteria** | `/api/criteria`, `/api/evaluation` | Live rubric (10/10 goals) + the real eval results table |
+| **Corpus** | `/api/corpus`, `/api/upload`, `/api/reset` | Doc list; **upload a PDF live** → chunk → embed → index → queryable instantly |
+| **Inspector** | `/api/inspect` (`src/inspect.py`) | Dense / BM25 / hybrid / reranked side‑by‑side with scores; visualizes the reranker reordering |
+| **Stack** | `/api/info` | Every model in use (LLM, 3 embeddings, reranker, Chroma, BM25, DuckDuckGo, LangGraph) |
+| **Code** | `/api/source[/file]` | In‑app source browser — allowlisted, path‑traversal‑safe, never serves `.env` |
+| **Chat** (docked) | `/api/ask`, `/api/config` | RAG answers + sources + web‑search badge; runtime embedding/strategy switching |
+
+Engineering notes: heavy objects (CRAG graph, corpus, cross‑encoder) are built
+once and cached; a rebuild lock serializes corpus mutations and swaps the graph
+atomically; a concurrency semaphore caps simultaneous `claude` subprocesses; the
+blocking pipeline runs in worker threads.
+
 ---
 
 ## 4. Goal coverage
@@ -129,7 +149,8 @@ cite paper titles inline.
 - ✅ **Multi‑user conversational RAG** — per‑session SQLite history
   (`src/memory.py`) with follow‑up questions condensed to standalone form before
   retrieval.
-- ✅ **Chainlit app** — `app.py`, a streaming chat UI.
+- ✅ **App / UI** — a FastAPI **RAG Explorer** (`webapp.py`, see §3.5) deployed
+  live at **https://paperbot.ganakys.com**, plus a Chainlit chat UI (`app.py`).
 - ✅ **Agentic Corrective RAG + web search** — `src/crag.py`, a LangGraph state
   machine that grades retrieved chunks and, when they're irrelevant, rewrites the
   query and falls back to a DuckDuckGo web search.
@@ -210,7 +231,11 @@ designed.
 *"Who invented it?"* was condensed to *"Who invented the Transformer (the neural
 network architecture that uses self‑attention)?"* before retrieval.
 
-**Chainlit UI** — boots and serves HTTP 200.
+**RAG Explorer web app** — verified end‑to‑end through the public HTTPS endpoint
+(`https://paperbot.ganakys.com`, behind a Basic‑Auth gate): index loads (HTTP 200),
+`/api/criteria` reports 10/10, an **upload → query → reset** cycle works (a freshly
+uploaded paper was answered with its own page citations), and the code browser
+blocks path traversal (`../.env` → 404). The Chainlit UI also boots (HTTP 200).
 
 ---
 
@@ -227,20 +252,22 @@ python build_index.py --embedding minilm
 python build_index.py --embedding bge
 python build_index.py --embedding gemini    # commercial embedding (needs GEMINI_API_KEY)
 
-# Try it
+# Try it (CLI)
 python -m src.rag  "What is self-attention?"
 python -m src.crag "What is retrieval augmented generation?"
 python evaluate.py                            # reproduce the comparison table
 
-# The chat UI
-chainlit run app.py -w                        # local
-chainlit run app.py --host 0.0.0.0 --port 8000  # VPS
+# The RAG Explorer web app (primary UI)
+uvicorn webapp:app --host 127.0.0.1 --port 8011   # open http://127.0.0.1:8011
+
+# The Chainlit chat UI (alternative)
+chainlit run app.py -w
 ```
 
 > The LLM runs through the local `claude` CLI (Claude Max), so **no OpenAI key is
 > required**. To use OpenAI instead, set `LLM_BACKEND=openai` and `OPENAI_API_KEY`.
 
-See **[DEMO.md](DEMO.md)** for a step‑by‑step walkthrough to present to a mentor.
+See **[DEMO.md](DEMO.md)** for the step‑by‑step demo walkthrough (driven from the app).
 
 ---
 
@@ -251,11 +278,30 @@ research-paper-bot/
 ├── config.py            # all settings (backend, models, chunking, retrieval)
 ├── build_index.py       # ingest PDFs → embed → persist Chroma
 ├── evaluate.py          # benchmark embeddings × strategies → eval_results.csv
-├── app.py               # Chainlit conversational UI
+├── webapp.py            # ← FastAPI RAG Explorer (primary web app)
+├── web/index.html       # ← the explorer UI (6 surfaces, docked chat)
+├── app.py               # Chainlit conversational UI (alternative)
 ├── scripts/download_papers.py
-├── deploy/              # nginx.conf + systemd unit for the VPS
+├── deploy/              # paperbot.service (systemd) + paperbot.nginx.conf + nginx.conf
 └── src/
     ├── claude_llm.py    # ← local Claude CLI LLM backend (this project's adapter)
+    ├── inspect.py       # ← staged retrieval (dense/bm25/hybrid/reranked) for the Inspector
     ├── ingest.py  embeddings.py  vectorstore.py  retrievers.py
     ├── rag.py     crag.py        websearch.py    memory.py
 ```
+
+---
+
+## 9. Live deployment
+
+The RAG Explorer runs publicly at **https://paperbot.ganakys.com** (access‑gated).
+
+- **Service:** `uvicorn webapp:app` on `127.0.0.1:8011`, managed by systemd
+  (`deploy/paperbot.service`) — auto‑starts on boot, restarts on failure.
+- **Reverse proxy:** nginx (`deploy/paperbot.nginx.conf`) terminates TLS
+  (Let's Encrypt) and proxies to the app, with long timeouts for the LLM endpoint.
+- **Access gate:** HTTP Basic Auth + per‑endpoint rate limits — because every query
+  spends Claude Max quota, the public URL is gated against abuse. A concurrency cap
+  in the app bounds simultaneous `claude` subprocesses.
+- **Cost:** **$0 per query** — generation runs on the local Claude CLI; embeddings
+  are local (HF) or free‑tier (Gemini).
