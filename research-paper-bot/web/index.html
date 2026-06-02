@@ -165,8 +165,8 @@
   .col h3{margin:0 0 3px;font-size:13px}.col .desc{font-size:10.5px;color:var(--faint);margin:0 0 9px;line-height:1.35}
   .cand{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin-bottom:6px;font-size:11.5px}
   .cand.kept{border-color:var(--good);background:var(--kept)}
-  .cand .h{display:flex;justify-content:space-between;gap:6px;align-items:baseline}
-  .cand .nm{font-weight:600;color:var(--accent);font-size:11px}
+  .cand .h{display:flex;justify-content:space-between;gap:6px;align-items:flex-start}
+  .cand .nm{font-weight:600;color:var(--accent);font-size:11px;flex:1;line-height:1.3}
   .cand .sc{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--warn);white-space:nowrap}
   .cand .pg{color:var(--faint);font-size:10px}
   .cand .sn{color:var(--muted);margin-top:3px;font-size:10.5px;line-height:1.35;max-height:44px;overflow:hidden}
@@ -237,7 +237,7 @@
     <!-- INSPECTOR -->
     <section class="tab" id="tab-inspect"><div class="wrap">
       <h2>Retrieval Inspector</h2>
-      <p class="sub">See <i>how</i> the system finds context for a question — before any answer is written. Type a question, then either <b>Inspect strategies</b> (one embedding: dense → BM25 → hybrid → reranked, side by side) or <b>Compare embeddings</b> (the same question through every embedding).</p>
+      <p class="sub">See <i>how</i> the system finds context for a question — before any answer is written. Type a question, then either <b>Inspect strategies</b> (one embedding: dense → BM25 → hybrid → reranked, side by side) or <b>Compare embeddings</b> (the same question through every embedding). Each card (📄) is a <b>chunk from one of the indexed papers</b> — so the most on-topic paper dominates (e.g. a "few-shot learning" query returns the <i>GPT-3 paper</i>, which is titled "Language Models are Few-Shot Learners").</p>
       <div style="font-size:13px;font-weight:600;margin:0 0 5px">① Type a question to retrieve for</div>
       <input id="iq" class="txt" value="What problem do positional encodings solve?" placeholder="Type any question about the papers…" style="width:100%" />
       <div class="chips" style="margin-top:7px">
@@ -478,7 +478,7 @@ async function runInspect(){
     ['dense','bm25','hybrid','reranked'].forEach(st=>{
       const items=d.stages[st]||[];const c=document.createElement('div');c.className='col';
       c.innerHTML='<h3>'+st[0].toUpperCase()+st.slice(1)+'</h3><div class="desc">'+SD[st]+'</div>'+
-        items.slice(0,6).map(it=>`<div class="cand ${it.kept?'kept':''}"><div class="h"><span class="nm">#${it.rank} ${esc(it.title.slice(0,20))}${it.kept?'<span class="keptpill">KEPT</span>':''}</span><span class="sc">${it.score!=null?it.score:'—'}</span></div><div class="pg">page ${esc(it.page)}</div><div class="sn">${esc(it.snippet)}</div></div>`).join('');
+        items.slice(0,6).map(it=>`<div class="cand ${it.kept?'kept':''}"><div class="h"><span class="nm">#${it.rank} 📄 ${esc(it.title)}${it.kept?'<span class="keptpill">KEPT</span>':''}</span><span class="sc">${it.score!=null?it.score:'—'}</span></div><div class="pg">page ${esc(it.page)}</div><div class="sn">${esc(it.snippet)}</div></div>`).join('');
       cols.appendChild(c);});
   }catch(e){cols.innerHTML='<p class="err">Network error</p>';}finally{$('#iBtn').disabled=false;}
 }
@@ -493,7 +493,7 @@ async function runCompare(){
       const c=document.createElement('div');c.className='col';
       c.innerHTML=`<h3>${esc(e.name)} <span class="tag ${e.type==='commercial'?'com':'os'}">${e.type}</span></h3>`+
         `<div class="desc">${esc(e.model)}<br>${e.vectors} vectors · ${e.dim}-dim</div>`+
-        e.results.map(it=>`<div class="cand"><div class="h"><span class="nm">#${it.rank} ${esc(it.title.slice(0,20))}</span><span class="sc">${it.score}</span></div><div class="pg">page ${esc(it.page)}</div><div class="sn">${esc(it.snippet)}</div></div>`).join('');
+        e.results.map(it=>`<div class="cand"><div class="h"><span class="nm">#${it.rank} 📄 ${esc(it.title)}</span><span class="sc">${it.score}</span></div><div class="pg">page ${esc(it.page)}</div><div class="sn">${esc(it.snippet)}</div></div>`).join('');
       cols.appendChild(c);});
   }catch(e){cols.innerHTML='<p class="err">Network error</p>';}finally{$('#ceBtn').disabled=false;}
 }
