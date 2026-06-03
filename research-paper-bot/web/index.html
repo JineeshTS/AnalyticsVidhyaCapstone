@@ -124,6 +124,29 @@
   .tag.com{background:#251f3d;color:#c9b8ff;border:1px solid #463a72}
   .tag.act{background:#15263f;color:var(--accent);border:1px solid #2f4f7a}
   /* criteria */
+  .hero{background:linear-gradient(120deg,rgba(110,168,254,.12),rgba(155,124,255,.07));
+       border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin-bottom:16px}
+  .hero .htag{font-size:11px;color:var(--accent);font-weight:600;text-transform:uppercase;letter-spacing:.07em}
+  .hero h2{font-size:22px;margin:5px 0 7px}
+  .hero .tagline{font-size:14px;color:var(--text);font-weight:500;line-height:1.5;margin:0 0 9px;max-width:760px}
+  .hero .blurb{font-size:12.5px;color:var(--muted);line-height:1.6;margin:0;max-width:820px}
+  .heronav{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}
+  .heronav button{font-size:12px}
+  .papershd{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 8px}
+  .papers{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+  .paper{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px 13px}
+  .paper .pt{font-weight:600;font-size:12.5px;line-height:1.35}
+  .paper .pd{color:var(--muted);font-size:11px;margin-top:4px;line-height:1.4}
+  .paper .py{display:inline-block;color:var(--faint);font-size:10px;font-family:ui-monospace,monospace;
+       border:1px solid var(--line);border-radius:8px;padding:1px 7px;margin-top:7px}
+  .critdesc{font-size:12px;color:var(--muted);margin:-3px 0 9px;line-height:1.45;max-width:760px}
+  .finding{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--good);
+       border-radius:10px;padding:12px 15px;margin:10px 0 14px;font-size:12.5px;color:var(--muted);line-height:1.6}
+  .finding b{color:var(--text);font-weight:650}
+  @keyframes flashpulse{0%{box-shadow:0 0 0 0 rgba(110,168,254,0)}
+       28%{box-shadow:inset 0 0 0 2px var(--accent),0 0 26px rgba(110,168,254,.45)}
+       100%{box-shadow:0 0 0 0 rgba(110,168,254,0)}}
+  .rail.flash{animation:flashpulse 1.4s ease}
   .scoreband{display:flex;align-items:center;gap:14px;background:var(--panel);border:1px solid var(--line);
        border-radius:13px;padding:14px 16px;margin-bottom:8px}
   .scoreband .big{font-size:26px;font-weight:750;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -211,13 +234,19 @@
   <main>
     <!-- CRITERIA -->
     <section class="tab active" id="tab-criteria"><div class="wrap">
-      <h2>Capstone evaluation criteria</h2>
-      <p class="sub">Live status against the Analytics Vidhya brief — every goal, how it's met, and a jump to the proof.</p>
+      <div class="hero" id="critHero"></div>
+      <div class="papershd">The papers it can answer from</div>
+      <div class="papers" id="critPapers"></div>
+
+      <h2 style="margin-top:24px">What the assignment asked for — and where it's met</h2>
+      <p class="sub">Every requirement from the Analytics Vidhya GenAI capstone brief, what it means here, and a one-click jump to the proof.</p>
       <div class="scoreband"><span class="big" id="critBig">…</span><div class="bar"><i id="critBar" style="width:0"></i></div>
         <span class="sub" style="margin:0" id="critTxt"></span></div>
       <div id="critList"></div>
-      <h2 style="margin-top:24px">Evaluation results <span class="sub" style="font-weight:400">— experiment &amp; choose the best approach</span></h2>
+
+      <h2 style="margin-top:24px" id="evalAnchor">Choosing the best approach <span class="sub" style="font-weight:400">— the real benchmark</span></h2>
       <p class="sub" id="evalMethod"></p>
+      <div id="evalFinding"></div>
       <div id="evalTable"></div>
     </div></section>
 
@@ -318,11 +347,20 @@
 const $=s=>document.querySelector(s);
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function showTab(name){
+  // Chat lives in the always-visible right rail, not a main tab — draw the eye to it.
+  if(name==='chat'){flashChat();return;}
+  if(!document.getElementById('tab-'+name))return;  // never blank the panel on an unknown tab
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id==='tab-'+name));
   if(name==='corpus')loadCorpus(); if(name==='stack')loadStack();
   if(name==='code')loadCodeList(); if(name==='criteria')loadCriteria();
   if(name==='how')loadHow();
+}
+function flashChat(){
+  const rail=document.querySelector('.rail');if(!rail)return;
+  rail.scrollIntoView({behavior:'smooth',block:'nearest'});
+  rail.classList.remove('flash');void rail.offsetWidth;rail.classList.add('flash');
+  const q=document.getElementById('q');if(q)setTimeout(()=>q.focus(),300);
 }
 async function loadHow(){
   const d=await (await fetch('/api/prompts')).json();
@@ -520,19 +558,50 @@ function card(role,name,note,model,tags,active){
 }
 
 // criteria
-let critLoaded=false;
+const PROOF={corpus:'Open Corpus →',inspect:'Open Inspector →',how:'See the pipeline →',
+  stack:'See the stack →',chat:'Try it in chat →',code:'View the code →',criteria:'Jump to results ↓'};
+function proofBtn(tab){
+  if(!tab)return '';
+  if(tab==='chat')return `<button class="btn go" onclick="flashChat()">${PROOF.chat}</button>`;
+  if(tab==='criteria')return `<button class="btn go" onclick="document.getElementById('evalAnchor').scrollIntoView({behavior:'smooth'})">${PROOF.criteria}</button>`;
+  return `<button class="btn go" onclick="showTab('${tab}')">${PROOF[tab]||'Show me →'}</button>`;
+}
 async function loadCriteria(){
   const d=await (await fetch('/api/criteria')).json();
+  // hero
+  const n=d.intro||{};
+  $('#critHero').innerHTML=
+    `<div class="htag">Analytics Vidhya · GenAI Capstone</div>`+
+    `<h2>${esc(n.name||'Research Paper Answer Bot')}</h2>`+
+    `<p class="tagline">${esc(n.tagline||'')}</p>`+
+    `<p class="blurb">${esc(n.blurb||'')}</p>`+
+    `<div class="heronav">`+
+      `<button class="btn" onclick="flashChat()">💬 Ask the papers</button>`+
+      `<button class="btn" onclick="showTab('inspect')">🔍 Inspect retrieval</button>`+
+      `<button class="btn" onclick="showTab('how')">🧠 How it works</button>`+
+    `</div>`;
+  // papers
+  $('#critPapers').innerHTML=(d.papers||[]).map(p=>
+    `<div class="paper"><div class="pt">${esc(p.title.replace(/\s*\(.*\)$/,''))}</div>`+
+    `<div class="pd">${esc(p.blurb)}</div><span class="py">${esc(p.year)}</span></div>`).join('');
+  // score
   $('#critBig').textContent=d.met+'/'+d.total;
   $('#critBar').style.width=Math.round(100*d.met/d.total)+'%';
-  $('#critTxt').textContent=(d.met===d.total?'All criteria met ✓':d.met+' of '+d.total+' met');
+  $('#critTxt').textContent=(d.met===d.total?'Every requirement met — including all 3 bonus goals ✓':d.met+' of '+d.total+' met');
+  // items grouped, with per-group descriptions
+  const descs={};(d.groups||[]).forEach(g=>descs[g.name]=g.desc);
+  const order=(d.groups||[]).map(g=>g.name);
   const groups={};d.items.forEach(i=>{(groups[i.group]=groups[i.group]||[]).push(i);});
+  const keys=order.length?order:Object.keys(groups);
   let h='';
-  for(const g of Object.keys(groups)){
+  for(const g of keys){
+    if(!groups[g])continue;
     h+=`<div class="critgrp">${esc(g)}</div>`;
+    if(descs[g])h+=`<div class="critdesc">${esc(descs[g])}</div>`;
     for(const i of groups[g]){
-      h+=`<div class="crit"><span class="ck">${i.met?'✅':'⬜'}</span><div class="b"><div class="ti">${esc(i.title)}</div><div class="how">${esc(i.how)}</div></div>`+
-         (i.tab&&i.tab!=='criteria'?`<button class="btn go" onclick="showTab('${i.tab}')">Show me →</button>`:'')+`</div>`;
+      h+=`<div class="crit"><span class="ck">${i.met?'✅':'⬜'}</span>`+
+         `<div class="b"><div class="ti">${esc(i.title)}</div><div class="how">${esc(i.how)}</div></div>`+
+         proofBtn(i.tab)+`</div>`;
     }
   }
   $('#critList').innerHTML=h;
@@ -541,6 +610,7 @@ async function loadCriteria(){
 async function loadEval(){
   const d=await (await fetch('/api/evaluation')).json();
   $('#evalMethod').textContent=d.method||'';
+  $('#evalFinding').innerHTML=d.finding?`<div class="finding">${d.finding}</div>`:'';
   if(!d.rows||!d.rows.length){$('#evalTable').innerHTML='<p class="sub">'+esc(d.note||'No results yet.')+'</p>';return;}
   let h='<table class="eval"><thead><tr><th>#</th><th>Embedding</th><th>Strategy</th><th>Avg score</th><th>Avg latency</th></tr></thead><tbody>';
   d.rows.forEach((r,i)=>{const best=i===0;

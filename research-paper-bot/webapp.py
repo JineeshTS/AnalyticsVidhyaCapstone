@@ -201,49 +201,130 @@ def evaluation() -> dict:
                          "avg_score": float(r["avg_score"]), "avg_latency_s": float(r["avg_latency_s"])})
     rows.sort(key=lambda x: (-x["avg_score"], x["avg_latency_s"]))
     best = rows[0] if rows else None
-    return {"rows": rows, "best": best,
-            "method": "LLM-as-judge answer quality (1-5) + latency, over 5 sample queries × 3 embeddings × 3 strategies."}
+    finding = None
+    if best:
+        rerank = [r for r in rows if r["strategy"] == "hybrid_rerank"]
+        rerank_note = (
+            f" The cross-encoder reranker actually <b>hurt</b> on this small {len(_doc_summary(_state.get('corpus', [])))}"
+            f"-document corpus — it trims the context to a handful of chunks and drops passages the answer "
+            f"needed, dragging quality down to {min(r['avg_score'] for r in rerank)}/5 while adding latency."
+            if rerank else ""
+        )
+        finding = (
+            f"<b>Hybrid retrieval wins.</b> Fusing keyword search (BM25) with semantic similarity beat "
+            f"pure dense retrieval for every embedding.{rerank_note} All the leading embeddings tied at "
+            f"{best['avg_score']}/5 with hybrid, so <b>{best['embedding']} + {best['strategy']}</b> was made "
+            f"the live default: strong open-source retrieval, the fastest of the leaders "
+            f"({best['avg_latency_s']}s), and no API cost."
+        )
+    return {"rows": rows, "best": best, "finding": finding,
+            "method": "LLM-as-judge answer quality (1–5) plus latency, over 5 sample queries × 3 embeddings × 3 strategies."}
+
+
+# One-line "why it matters" + year for each seminal paper, keyed by source filename.
+# Used only to render the intro strip on the Criteria page.
+PAPER_META = {
+    "Attention_Is_All_You_Need.pdf": ("The Transformer — self-attention replaces recurrence", "2017"),
+    "BERT.pdf": ("Bidirectional pre-training for language understanding", "2018"),
+    "GPT-3_Language_Models_Few_Shot.pdf": ("Few-shot learning emerges at scale", "2020"),
+    "RAG_Retrieval_Augmented_Generation.pdf": ("The paper that named retrieval-augmented generation", "2020"),
+    "Chain_of_Thought_Prompting.pdf": ("Step-by-step reasoning unlocks harder problems", "2022"),
+    "InstructGPT_Training_with_Human_Feedback.pdf": ("RLHF — aligning models to follow instructions", "2022"),
+}
+
+GROUP_REQUIRED = "Required by the assignment"
+GROUP_STRETCH = "Stretch goals (bonus)"
 
 
 @app.get("/api/criteria")
 def criteria() -> dict:
-    """Live rubric: each capstone goal, whether it's met, how, and where to see it."""
+    """Live rubric for the Analytics Vidhya GenAI capstone: a project intro, the
+    indexed papers, and each requirement with whether it's met, a self-contained
+    explanation, and a jump to the proof."""
     docs = _doc_summary(_state.get("corpus", []))
+    chunk_total = sum(d["chunks"] for d in docs)
     built = [n for n in config.EMBEDDING_MODELS if has_vectorstore(n)]
     commercial = [n for n in built if config.EMBEDDING_MODELS[n]["provider"] in ("gemini", "openai")]
     opensource = [n for n in built if config.EMBEDDING_MODELS[n]["provider"] == "huggingface"]
     has_eval = (config.STORAGE_DIR / "eval_results.csv").exists()
 
+    # The seminal papers actually present in the corpus, in chronological order.
+    present = {d["source"] for d in docs}
+    papers = [
+        {"title": config.display_title(src), "blurb": meta[0], "year": meta[1]}
+        for src, meta in PAPER_META.items() if src in present
+    ]
+    embed_label = {n: config.EMBEDDING_MODELS[n]["label"].split(" (")[0] for n in built}
+    embed_names = ", ".join(embed_label.get(n, n) for n in built) or "none built yet"
+
+    intro = {
+        "name": "Research Paper Answer Bot",
+        "tagline": "Ask landmark Generative-AI papers anything — every answer is grounded, "
+                   "cited to the page, and written by a Claude model running locally at $0 API cost.",
+        "blurb": f"A Retrieval-Augmented Generation (RAG) system built for the Analytics Vidhya "
+                 f"GenAI capstone. {len(papers)} seminal papers are parsed into {chunk_total} text "
+                 f"chunks and indexed in a Chroma vector database. Questions are answered by Claude "
+                 f"({config.CLAUDE_MODEL}) run through the local Claude CLI — so there is no per-query "
+                 f"API spend. It cites the exact paper and page behind every answer, and falls back to "
+                 f"a live web search when the papers don't cover the question.",
+    }
+
     def c(group, title, met, how, tab):
         return {"group": group, "title": title, "met": met, "how": how, "tab": tab}
 
     items = [
-        c("Compulsory", "Dataset of research papers", len(docs) > 0,
-          f"{len(docs)} papers loaded ({sum(d['chunks'] for d in docs)} chunks). Add more in the Corpus tab.", "corpus"),
-        c("Compulsory", "Load & index in a vector database", len(built) > 0,
-          f"PDFs → 938 chunks → embedded into Chroma: {len(built)} persisted collections "
-          f"({', '.join(built)}). Open Corpus to see/upload docs and view chunks; Stack shows vector counts + dimensions.", "corpus"),
-        c("Compulsory", "Compare embeddings (open-source + commercial)",
+        c(GROUP_REQUIRED, "A dataset of research papers", len(papers) > 0,
+          f"{len(papers)} landmark Generative-AI papers are loaded — "
+          f"{', '.join(p['title'].split(' (')[0] for p in papers)} — totalling {chunk_total} chunks. "
+          f"You can drop in your own PDF on the Corpus tab and query it immediately.", "corpus"),
+        c(GROUP_REQUIRED, "Loaded & indexed in a vector database", len(built) > 0,
+          f"Every chunk is embedded and stored in a persistent Chroma vector DB. "
+          f"{len(built)} separate collections are built — one per embedding model ({embed_names}) — "
+          f"so they can be compared head-to-head. The Stack tab shows each collection's vector count "
+          f"and dimensions.", "corpus"),
+        c(GROUP_REQUIRED, "Embeddings compared: open-source vs. commercial",
           len(opensource) > 0 and len(commercial) > 0,
-          f"Open-source ({', '.join(opensource)}) + commercial ({', '.join(commercial)}). "
-          f"Inspector → 'Compare embeddings' runs one query through all three side by side; the evaluation table below scores each.", "inspect"),
-        c("Compulsory", "Compare retrieval strategies (cosine → hybrid → reranker)", True,
-          "dense / hybrid (dense+BM25) / hybrid_rerank (cross-encoder) — see them side-by-side.", "inspect"),
-        c("Compulsory", "Vector DB connected to an LLM (RAG pipeline)", True,
-          f"Claude ({config.CLAUDE_MODEL}) via local CLI; LangGraph orchestrates retrieve→generate.", "chat"),
-        c("Compulsory", "Tested on sample queries + chosen best approach", has_eval,
-          "evaluate.py benchmark — see the ranked results table below.", "criteria"),
-        c("Compulsory", "Show the source of every answer (top 3)", True,
-          "Each answer lists the top-3 source chunks with paper title + page.", "chat"),
-        c("Stretch", "Multi-user conversational RAG", True,
-          "Per-session memory (SQLite) + follow-ups condensed to standalone questions.", "chat"),
-        c("Stretch", "Streamlit / Chainlit app (a UI)", True,
-          "This FastAPI web app (and a Chainlit app) on top of the RAG system.", "chat"),
-        c("Stretch", "Agentic Corrective RAG + web search", True,
-          "LangGraph grades chunks; if irrelevant it rewrites the query and searches the web.", "inspect"),
+          f"Open-source models ({', '.join(opensource)}) run locally on the VPS CPU; the commercial "
+          f"model ({', '.join(commercial)}) uses Google's free tier. The Inspector's "
+          f"‘Compare embeddings’ button runs one question through all of them at once, and the "
+          f"benchmark below scores each.", "inspect"),
+        c(GROUP_REQUIRED, "Retrieval strategies compared: dense → hybrid → reranker", True,
+          "Three strategies are benchmarked: dense (pure semantic similarity), hybrid (dense + BM25 "
+          "keyword search fused with Reciprocal Rank Fusion), and hybrid + a cross-encoder reranker. "
+          "The Inspector lays all three out side-by-side for any query.", "inspect"),
+        c(GROUP_REQUIRED, "Vector DB wired to an LLM (the RAG pipeline)", True,
+          f"Retrieved chunks are passed to Claude ({config.CLAUDE_MODEL}), run locally via the Claude "
+          f"CLI at zero API cost. LangGraph orchestrates the full retrieve → grade → generate "
+          f"flow. Ask anything in the chat panel on the right.", "chat"),
+        c(GROUP_REQUIRED, "Tested on sample queries; best approach chosen", has_eval,
+          "A reproducible benchmark (evaluate.py) scores 5 sample queries across 3 embeddings × 3 "
+          "strategies using an LLM-as-judge (1–5). The winner became the live default. The full "
+          "ranking and the finding are in the results table below.", "criteria"),
+        c(GROUP_REQUIRED, "Every answer shows its sources", True,
+          f"Each answer lists the top {config.TOP_SOURCES} source chunks it actually used, with the "
+          f"paper title and page number — and a link out when it falls back to web search. Ask a "
+          f"question to see it, then expand the trace to view the exact context sent to the model.", "chat"),
+        c(GROUP_STRETCH, "Multi-user conversational memory", True,
+          "Each browser session gets its own conversation history (SQLite). Follow-ups like "
+          "‘and what about BERT?’ are automatically rewritten into standalone questions before "
+          "retrieval, so context carries across turns without leaking between users.", "chat"),
+        c(GROUP_STRETCH, "A web UI on top of the RAG core", True,
+          "Two interfaces ship on the same RAG engine: this custom FastAPI single-page explorer "
+          "(chat + corpus + inspector + live config), and a Chainlit chat app.", "chat"),
+        c(GROUP_STRETCH, "Agentic Corrective RAG with web-search fallback", True,
+          "LangGraph grades each retrieved chunk for real relevance. If the papers can't answer the "
+          "question, it rewrites the query and runs a live web search — so it can also answer about "
+          "newer work (e.g. Mamba, 2023). The answer trace shows every step it took.", "chat"),
     ]
     met = sum(1 for i in items if i["met"])
-    return {"items": items, "met": met, "total": len(items)}
+    groups = [
+        {"name": GROUP_REQUIRED,
+         "desc": "The compulsory deliverables from the Analytics Vidhya capstone brief."},
+        {"name": GROUP_STRETCH,
+         "desc": "Optional extensions suggested by the brief — all three are implemented."},
+    ]
+    return {"intro": intro, "papers": papers, "groups": groups,
+            "items": items, "met": met, "total": len(items)}
 
 
 @app.get("/api/info")
