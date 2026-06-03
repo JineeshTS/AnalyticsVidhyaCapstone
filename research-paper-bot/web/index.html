@@ -170,6 +170,9 @@
   .doc{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 13px;font-size:13px}
   .doc{cursor:pointer}.doc .ttl{font-weight:600}.doc .c{margin-left:auto;color:var(--muted);font-size:12px}
   .doc .chev{color:var(--faint);font-size:11px;transition:.15s}
+  .doc .pdflink{margin-left:auto;font-size:11px;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:10px;padding:2px 9px;white-space:nowrap;transition:.15s}
+  .doc .pdflink:hover{color:var(--fg);border-color:var(--accent,#6aa3ff)}
+  .doc .pdflink+.c{margin-left:0}
   .upbadge{font-size:9.5px;color:var(--good);border:1px solid var(--good);border-radius:10px;padding:1px 7px;margin-left:8px}
   .origbadge{font-size:9.5px;color:var(--faint);border:1px solid var(--line);border-radius:10px;padding:1px 7px;margin-left:8px}
   .chunks{margin:4px 0 10px;padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:9px}
@@ -452,6 +455,7 @@ async function loadCorpus(){
     `<div class="doc ${x.uploaded?'new':''}" onclick="toggleChunks('${encodeURIComponent(x.source)}',this)">`+
     `<span class="chev">▸</span><span class="ttl">${esc(x.title)}</span>`+
     `${x.uploaded?'<span class="upbadge">⬆ uploaded</span>':'<span class="origbadge">original</span>'}`+
+    `<a class="pdflink" href="/api/document?source=${encodeURIComponent(x.source)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open the original PDF in a new tab">📄 PDF ↗</a>`+
     `<span class="c">${x.chunks} chunks · view ▾</span></div>`).join('');
 }
 async function toggleChunks(srcEnc,row){

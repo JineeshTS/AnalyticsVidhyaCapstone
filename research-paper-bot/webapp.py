@@ -377,6 +377,24 @@ def corpus() -> dict:
     }
 
 
+@app.get("/api/document")
+def document(source: str, download: bool = False):
+    """Serve an original corpus PDF. Restricted to files directly inside DATA_DIR —
+    the request is reduced to a bare basename so '../' traversal is impossible, and the
+    resolved path must still sit under DATA_DIR. View inline by default; ?download=1 saves."""
+    safe = Path(source).name  # strip any directory components before touching the fs
+    data_root = config.DATA_DIR.resolve()
+    path = (data_root / safe).resolve()
+    if data_root not in path.parents or not path.is_file() or path.suffix.lower() != ".pdf":
+        return JSONResponse({"error": "Document not found."}, status_code=404)
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=safe,
+        content_disposition_type="attachment" if download else "inline",
+    )
+
+
 def _lang_for(rel: str) -> str:
     ext = rel.rsplit(".", 1)[-1].lower()
     return {"py": "python", "html": "html", "md": "markdown", "txt": "plaintext",
