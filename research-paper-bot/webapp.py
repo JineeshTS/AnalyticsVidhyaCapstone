@@ -52,7 +52,8 @@ CONDENSE_PROMPT = ChatPromptTemplate.from_messages(
     ]
 )
 
-STRATEGIES = ["dense", "hybrid", "hybrid_rerank"]
+STRATEGIES = config.STRATEGY_NAMES                  # the 7 concrete strategies
+STRATEGIES_WITH_AUTO = ["auto"] + STRATEGIES        # + the gate-driven router
 MAX_CONCURRENCY = 2
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
@@ -101,6 +102,8 @@ def _doc_summary(corpus) -> list:
 
 def _rebuild_state():
     """(Re)build corpus + CRAG graph for the current embedding/strategy. Blocking."""
+    from src.crag import clear_retriever_cache
+    clear_retriever_cache()   # corpus may have changed → drop stale (BM25-backed) retrievers
     corpus = build_corpus()
     _state["corpus"] = corpus
     _state["original_sources"] = _state.get("original_sources") or {d.metadata.get("source") for d in corpus}
@@ -125,6 +128,7 @@ app = FastAPI(title="Research Paper Answer Bot", lifespan=lifespan)
 
 class AskRequest(BaseModel):
     question: str
+    strategy: str | None = None     # "auto" or a registry name; defaults to the active strategy
 
 
 class InspectRequest(BaseModel):
@@ -152,7 +156,7 @@ def health() -> dict:
 def prompts() -> dict:
     """The actual prompts sent to the LLM, the config knobs, and the pipeline —
     so the evaluator can see exactly how the system is wired."""
-    from src.crag import ANSWER_PROMPT, GRADE_PROMPT, REWRITE_PROMPT
+    from src.crag import ANSWER_PROMPT, GATE_PROMPT, GRADE_PROMPT, REWRITE_PROMPT
 
     def tmpl_text(tmpl):
         out = []
@@ -166,6 +170,7 @@ def prompts() -> dict:
 
     return {
         "prompts": [
+            {"name": "Query gate (pre-RAG router)", "role": "Classify the question, route the retrieval strategy, and ask for clarification when it's too vague — before any search", "text": tmpl_text(GATE_PROMPT)},
             {"name": "Answer (RAG generation)", "role": "Generate the grounded answer from retrieved context", "text": tmpl_text(ANSWER_PROMPT)},
             {"name": "Relevance grader (CRAG)", "role": "Decide if a retrieved chunk actually helps answer the question", "text": tmpl_text(GRADE_PROMPT)},
             {"name": "Query rewriter (CRAG)", "role": "Turn the question into a web-search query before the fallback", "text": tmpl_text(REWRITE_PROMPT)},
@@ -176,12 +181,14 @@ def prompts() -> dict:
             "TOP_K": config.TOP_K, "TOP_SOURCES": config.TOP_SOURCES,
             "RERANK_TOP_N": config.RERANK_TOP_N, "WEB_SEARCH_RESULTS": config.WEB_SEARCH_RESULTS,
             "LLM_BACKEND": config.LLM_BACKEND, "CLAUDE_MODEL": config.CLAUDE_MODEL,
+            "GATE_MODEL": config.GATE_MODEL, "WEB_SEARCH_PROVIDER": config.WEB_SEARCH_PROVIDER,
         },
         "pipeline": [
-            "retrieve — fetch candidate chunks (dense + BM25, fused; optional rerank)",
+            "analyse — a fast LLM gate classifies the question, routes the strategy, and asks to clarify if it's too vague",
+            "retrieve — fetch candidate chunks with the chosen strategy (dense / hybrid / rerank / mmr / multi-query / hyde / adaptive)",
             "grade — an LLM judges each chunk for real relevance",
             "decide — relevant chunks? answer from papers : fall back to web",
-            "rewrite + web search — only when no chunk is relevant (DuckDuckGo)",
+            "rewrite + web search — only when no chunk is relevant (pluggable; DuckDuckGo by default)",
             "generate — Claude writes the answer from the context, with sources",
         ],
     }
@@ -288,10 +295,10 @@ def criteria() -> dict:
           f"model ({', '.join(commercial)}) uses Google's free tier. The Inspector's "
           f"‘Compare embeddings’ button runs one question through all of them at once, and the "
           f"benchmark below scores each.", "inspect"),
-        c(GROUP_REQUIRED, "Retrieval strategies compared: dense → hybrid → reranker", True,
-          "Three strategies are benchmarked: dense (pure semantic similarity), hybrid (dense + BM25 "
-          "keyword search fused with Reciprocal Rank Fusion), and hybrid + a cross-encoder reranker. "
-          "The Inspector lays all three out side-by-side for any query.", "inspect"),
+        c(GROUP_REQUIRED, "Retrieval strategies compared: 7 strategies + Auto routing", True,
+          "Seven strategies are selectable live — dense, hybrid (dense + BM25 fused with RRF), "
+          "hybrid + cross-encoder rerank, MMR, multi-query, HyDE, and our own adaptive_hybrid (query-shape-aware "
+          "BM25↔dense weighting + MMR). The Inspector lays the core stages side-by-side; the benchmark below picked the winner.", "inspect"),
         c(GROUP_REQUIRED, "Vector DB wired to an LLM (the RAG pipeline)", True,
           f"Retrieved chunks are passed to Claude ({config.CLAUDE_MODEL}), run locally via the Claude "
           f"CLI at zero API cost. LangGraph orchestrates the full retrieve → grade → generate "
@@ -315,6 +322,11 @@ def criteria() -> dict:
           "LangGraph grades each retrieved chunk for real relevance. If the papers can't answer the "
           "question, it rewrites the query and runs a live web search — so it can also answer about "
           "newer work (e.g. Mamba, 2023). The answer trace shows every step it took.", "chat"),
+        c(GROUP_STRETCH, "Pre-RAG query gate: smart routing + clarifying questions", True,
+          "Before retrieving, a fast LLM gate quality-checks the prompt: if it's too vague it asks a "
+          "clarifying question instead of guessing; if it's clear it auto-routes to the best strategy "
+          "(keyword-leaning vs semantic) from the query's shape. Pick 'Auto' in the right rail and watch "
+          "the trace's '0 · Analyze query' step.", "chat"),
     ]
     met = sum(1 for i in items if i["met"])
     groups = [
@@ -325,6 +337,81 @@ def criteria() -> dict:
     ]
     return {"intro": intro, "papers": papers, "groups": groups,
             "items": items, "met": met, "total": len(items)}
+
+
+# Deep "what / how / why / alternatives" for each stack component — powers the
+# clickable Stack-tile modals AND the How-it-Works "Why …?" FAQ (one source).
+STACK_DETAILS = {
+    "llm": {
+        "what": "Claude (via the local `claude` CLI) wrapped as a LangChain chat model. The fast `haiku` model runs the query gate; the main model writes answers.",
+        "how": ["Generates the final grounded answer from retrieved context",
+                "Acts as the CRAG relevance grader (per-chunk yes/no)",
+                "Powers the pre-RAG query gate (classify + route + clarify) on the cheaper haiku model",
+                "Rewrites the query for the web-search fallback, and condenses follow-ups"],
+        "why": "Runs on the host's Claude Max plan through a subprocess → zero per-query API cost, no API key inside the app, and the papers never leave the box. That is the whole reason this capstone costs $0 to run.",
+        "alternatives": ["OpenAI GPT-4o-mini — per-token cost + an API key to manage",
+                         "Local Llama via Ollama — free but weaker and heavy on a CPU-only VPS"],
+    },
+    "reranker": {
+        "what": "A cross-encoder (BAAI/bge-reranker-base) that reads the query and a passage together and scores their true relevance.",
+        "how": ["In the `hybrid_rerank` strategy, re-scores the fused candidate pool",
+                "Writes the real relevance_score into each surviving chunk — shown on the source cards",
+                "Keeps the top-N (RERANK_TOP_N) chunks for the answer"],
+        "why": "A cross-encoder is more accurate than embedding cosine because it attends across the query and passage jointly. We kept it as a selectable strategy for transparency — even though our benchmark found it HURTS on this tiny 6-paper corpus (it over-trims context).",
+        "alternatives": ["Cohere Rerank — strong but a paid API", "No reranker — our actual default, since plain hybrid won the benchmark"],
+    },
+    "vector_db": {
+        "what": "Chroma — an embedded, persistent vector database. One collection per embedding model (papers_<name>), stored on local disk.",
+        "how": ["Stores every chunk's vector + metadata (title, page, source, chunk_id)",
+                "Serves dense similarity and MMR search at query time",
+                "Per-model collections let us compare embeddings head-to-head on the same corpus"],
+        "why": "Embedded and zero-ops — there is no database server to run on the VPS; it persists to disk, integrates first-class with LangChain, supports metadata filtering and MMR natively, is open-source, and runs on CPU. Ideal for a self-contained, zero-spend capstone.",
+        "alternatives": ["FAISS — fast, but no built-in persistence/metadata ergonomics (lower-level)",
+                         "pgvector — needs a running Postgres instance",
+                         "Pinecone / Weaviate — hosted: network latency, API keys and cost (breaks zero-spend)",
+                         "Elasticsearch / OpenSearch — excellent for keyword+vector at scale, but heavyweight to operate; we get the keyword signal in-process via BM25 instead"],
+    },
+    "keyword": {
+        "what": "BM25 sparse keyword retrieval (rank_bm25) over the same chunks as the vectors.",
+        "how": ["Scores exact term overlap between query and chunk",
+                "Fused with dense results via Reciprocal Rank Fusion in `hybrid` and `adaptive_hybrid`",
+                "Adaptive Hybrid raises BM25's weight when the query is an acronym / short / quoted"],
+        "why": "Embeddings smear exact tokens; BM25 nails acronyms and rare terms (e.g. 'NSP', 'BLEU', 'GPT-3'). Fusing both beats either alone — which is exactly what our benchmark showed. At production scale this is the role Elasticsearch / OpenSearch would play.",
+        "alternatives": ["Elasticsearch / OpenSearch BM25 — scales, but a service to operate", "SPLADE learned-sparse — stronger but much heavier"],
+    },
+    "web_search": {
+        "what": "A pluggable web-search provider used only as the Corrective-RAG fallback. DuckDuckGo by default (free, no key).",
+        "how": ["Fires only when the CRAG grader keeps ZERO relevant chunks",
+                "The query is rewritten, the provider is called, and results fold back in as Documents",
+                "Provider is selected by env (WEB_SEARCH_PROVIDER) and auto-falls back to DuckDuckGo"],
+        "why": "Lets the bot answer newer work that isn't in the corpus (e.g. Mamba, 2023) instead of confidently hallucinating. Kept free/zero-spend: DuckDuckGo needs no key; Brave (2k/mo) and Serper (2.5k/mo) free tiers drop in via env. SerpAPI was deliberately rejected — it is paid.",
+        "alternatives": ["Brave Search API — free tier, key", "Serper.dev — free tier, key", "SerpAPI — paid (rejected to stay zero-spend)"],
+    },
+    "orchestration": {
+        "what": "LangGraph — a state machine that compiles the agentic Corrective-RAG flow into explicit nodes and edges.",
+        "how": ["Nodes: gate → retrieve → grade → (rewrite → web) → generate",
+                "Conditional edges: clarify-or-retrieve after the gate, and answer-or-web-fallback after grading",
+                "Every node appends a trace event — that trace IS the UI's 'how this answer was produced'"],
+        "why": "A self-correcting pipeline that can branch (web fallback) and exit early (ask for clarification) needs explicit, inspectable control flow — not a linear chain. LangGraph makes the routing auditable, which is the whole point of the transparency story.",
+        "alternatives": ["A hand-rolled if/else chain — works but isn't inspectable", "LangChain AgentExecutor — less deterministic control over the flow"],
+    },
+}
+
+
+def _embedding_details(name: str, spec: dict) -> dict:
+    why = {
+        "minilm": "Tiny and fast — the open-source baseline to beat. Good enough to show the comparison cheaply.",
+        "bge": "Strong open-source retrieval that runs free on CPU — it won our benchmark, so it's the live default.",
+        "gemini": "A commercial model on its free tier — included so the capstone's required open-source-vs-commercial comparison is real, at no cost.",
+        "openai": "The commercial reference point (text-embedding-3-small) — wired in but optional (needs a key).",
+    }.get(name, "One of the embedding models compared in the capstone.")
+    return {
+        "what": f"{spec['label']} — embeds text into a {'commercial' if spec['provider'] in ('openai','gemini') else 'local open-source'} vector space.",
+        "how": ["Encodes every chunk into a vector at index time (its own Chroma collection)",
+                "Encodes the query at search time for dense / MMR / hybrid retrieval"],
+        "why": why,
+        "alternatives": ["Switch live from the right-rail Embedding selector and compare on the Inspector tab"],
+    }
 
 
 @app.get("/api/info")
@@ -343,19 +430,27 @@ def info() -> dict:
             "type": ("commercial" if s["provider"] in ("openai", "gemini") else "open-source"),
             "active": n == _state["embedding"], "ready": ready,
             "vectors": stats["vectors"], "dim": stats["dim"],
+            "details": _embedding_details(n, s),
         })
     return {
-        "llm": {"role": "Generation · CRAG grader · query rewriter · follow-up condenser",
-                "backend": config.LLM_BACKEND, "model": config.CLAUDE_MODEL, "label": llm_label},
+        "llm": {"role": "Generation · CRAG grader · query gate · query rewriter · follow-up condenser",
+                "backend": config.LLM_BACKEND, "model": config.CLAUDE_MODEL, "label": llm_label,
+                "details": STACK_DETAILS["llm"]},
         "embeddings": embeddings,
         "reranker": {"role": "Cross-encoder reranking (hybrid_rerank)", "model": config.RERANKER_MODEL,
-                     "type": "open-source", "active": _state["strategy"] == "hybrid_rerank"},
+                     "type": "open-source", "active": _state["strategy"] == "hybrid_rerank",
+                     "details": STACK_DETAILS["reranker"]},
         "vector_db": {"name": "Chroma", "note": "one persisted collection per embedding; vectors persisted on disk",
                       "collections": [{"name": e["name"], "collection": config.EMBEDDING_MODELS[e["name"]] and f"papers_{e['name']}",
-                                       "vectors": e["vectors"], "dim": e["dim"]} for e in embeddings if e["ready"]]},
-        "keyword": {"name": "BM25 (rank_bm25)", "note": "sparse retrieval fused into hybrid"},
-        "web_search": {"name": "DuckDuckGo (ddgs)", "note": "Corrective-RAG fallback when papers don't cover a query"},
-        "orchestration": {"name": "LangGraph", "note": "retrieve → grade → (rewrite → web) → generate"},
+                                       "vectors": e["vectors"], "dim": e["dim"]} for e in embeddings if e["ready"]],
+                      "details": STACK_DETAILS["vector_db"]},
+        "keyword": {"name": "BM25 (rank_bm25)", "note": "sparse retrieval fused into hybrid", "details": STACK_DETAILS["keyword"]},
+        "web_search": {"name": {"ddg": "DuckDuckGo (ddgs)", "brave": "Brave Search API", "serper": "Serper (Google)"}.get(config.WEB_SEARCH_PROVIDER, config.WEB_SEARCH_PROVIDER),
+                       "provider": config.WEB_SEARCH_PROVIDER, "providers": ["ddg", "brave", "serper"],
+                       "note": "Corrective-RAG fallback when papers don't cover a query; pluggable, auto-falls back to DuckDuckGo (free, no paid SerpAPI)",
+                       "details": STACK_DETAILS["web_search"]},
+        "orchestration": {"name": "LangGraph", "note": "gate → retrieve → grade → (rewrite → web) → generate", "details": STACK_DETAILS["orchestration"]},
+        "strategies": config.STRATEGY_REGISTRY,
         "active": {"embedding": _state["embedding"], "strategy": _state["strategy"]},
     }
 
@@ -373,7 +468,8 @@ def corpus() -> dict:
         "total_docs": len(docs),
         "total_chunks": sum(d["chunks"] for d in docs),
         "config": {"embedding": _state["embedding"], "strategy": _state["strategy"]},
-        "options": {"embeddings": embeddings, "strategies": STRATEGIES},
+        "options": {"embeddings": embeddings, "strategies": STRATEGIES,
+                    "strategy_registry": config.STRATEGY_REGISTRY, "auto_available": True},
     }
 
 
@@ -470,49 +566,80 @@ async def set_config(req: ConfigRequest) -> dict:
 
 
 @app.post("/api/upload")
-async def upload(file: UploadFile = File(...)) -> dict:
-    if not file.filename.lower().endswith(".pdf"):
-        return JSONResponse({"error": "Only PDF files are supported."}, status_code=400)
-    data = await file.read()
-    if len(data) > MAX_UPLOAD_BYTES:
-        return JSONResponse({"error": "File too large (max 25 MB)."}, status_code=400)
+async def upload(files: list[UploadFile] = File(...)) -> dict:
+    """Add one or more PDFs live → chunk → embed → index → queryable instantly.
 
-    safe = Path(file.filename).name
-    dest = config.DATA_DIR / safe
-    dest.write_bytes(data)
+    Accepts a batch (field name ``files``, repeated). Each file is read and
+    validated up front; valid ones are ingested under a single rebuild lock and
+    the CRAG graph is rebuilt ONCE at the end, so dropping N files is one atomic
+    swap rather than N. A bad file in the batch is reported per-file and never
+    aborts the good ones. Backwards compatible with a single-file submission.
+    """
+    # Read + validate every upload before taking the (serializing) rebuild lock.
+    staged: list[tuple[str, bytes]] = []   # (safe_name, bytes) — the ones to ingest
+    results: list[dict] = []               # per-file outcome
+    for file in files:
+        safe = Path(file.filename or "").name
+        if not safe.lower().endswith(".pdf"):
+            results.append({"filename": safe or "(unnamed)", "ok": False,
+                            "error": "Only PDF files are supported."})
+            continue
+        data = await file.read()
+        if len(data) > MAX_UPLOAD_BYTES:
+            results.append({"filename": safe, "ok": False,
+                            "error": "File too large (max 25 MB)."})
+            continue
+        staged.append((safe, data))
 
-    async with _rebuild_lock:
-        def _ingest():
-            chunks = load_single_pdf(dest)
-            pages = len({c.metadata.get("page_number") for c in chunks})
-            emb_status = []
-            for name in config.EMBEDDING_MODELS:
-                if not has_vectorstore(name):
-                    continue
-                try:
-                    add_to_vectorstore(chunks, name)
-                    emb_status.append({"name": name, "label": config.EMBEDDING_MODELS[name]["label"], "status": "indexed"})
-                except Exception as e:  # e.g. gemini quota — keep the local ones
-                    emb_status.append({"name": name, "label": config.EMBEDDING_MODELS[name]["label"], "status": f"error: {str(e)[:80]}"})
-            _rebuild_state()  # refresh corpus + graph so it's queryable now
-            sample = chunks[len(chunks) // 2] if chunks else None
-            return {
-                "filename": safe,
-                "title": config.display_title(safe, chunks[0].metadata.get("title", safe)) if chunks else safe,
-                "pages": pages,
-                "chunks": len(chunks),
-                "sample_chunk": {
-                    "page": sample.metadata.get("page_number") if sample else None,
-                    "text": (sample.page_content[:400].strip() if sample else ""),
-                } if sample else None,
-                "embeddings": emb_status,
-            }
-        result = await asyncio.to_thread(_ingest)
+    if staged:
+        async with _rebuild_lock:
+            def _ingest_all():
+                out = []
+                for safe, data in staged:
+                    dest = config.DATA_DIR / safe
+                    dest.write_bytes(data)
+                    try:
+                        chunks = load_single_pdf(dest)
+                    except Exception as e:
+                        out.append({"filename": safe, "ok": False,
+                                    "error": f"Parse failed: {str(e)[:100]}"})
+                        continue
+                    pages = len({c.metadata.get("page_number") for c in chunks})
+                    emb_status = []
+                    for name in config.EMBEDDING_MODELS:
+                        if not has_vectorstore(name):
+                            continue
+                        try:
+                            add_to_vectorstore(chunks, name)
+                            emb_status.append({"name": name, "label": config.EMBEDDING_MODELS[name]["label"], "status": "indexed"})
+                        except Exception as e:  # e.g. gemini quota — keep the local ones
+                            emb_status.append({"name": name, "label": config.EMBEDDING_MODELS[name]["label"], "status": f"error: {str(e)[:80]}"})
+                    sample = chunks[len(chunks) // 2] if chunks else None
+                    out.append({
+                        "filename": safe,
+                        "ok": True,
+                        "title": config.display_title(safe, chunks[0].metadata.get("title", safe)) if chunks else safe,
+                        "pages": pages,
+                        "chunks": len(chunks),
+                        "sample_chunk": {
+                            "page": sample.metadata.get("page_number") if sample else None,
+                            "text": (sample.page_content[:400].strip() if sample else ""),
+                        } if sample else None,
+                        "embeddings": emb_status,
+                    })
+                _rebuild_state()  # one rebuild for the whole batch → single atomic swap
+                return out
+            results.extend(await asyncio.to_thread(_ingest_all))
 
     docs = _doc_summary(_state["corpus"])
-    result["total_docs"] = len(docs)
-    result["total_chunks"] = sum(d["chunks"] for d in docs)
-    return result
+    ingested = [r for r in results if r.get("ok")]
+    return {
+        "results": results,
+        "ingested": len(ingested),
+        "failed": len(results) - len(ingested),
+        "total_docs": len(docs),
+        "total_chunks": sum(d["chunks"] for d in docs),
+    }
 
 
 @app.post("/api/reset")
@@ -614,6 +741,11 @@ async def ask(req: AskRequest, response: Response, sid: str | None = Cookie(defa
         sid = str(uuid.uuid4())
         response.set_cookie("sid", sid, max_age=60 * 60 * 24, httponly=True, samesite="lax")
 
+    # Strategy: per-request override ("auto" routes via the gate); else the active default.
+    requested_strategy = (req.strategy or _state["strategy"])
+    if requested_strategy not in STRATEGIES_WITH_AUTO:
+        return JSONResponse({"error": f"Unknown strategy '{requested_strategy}'."}, status_code=400)
+
     crag_app = _state["crag_app"]
     condenser = _state["condenser"]
 
@@ -626,19 +758,38 @@ async def ask(req: AskRequest, response: Response, sid: str | None = Cookie(defa
         except Exception:
             standalone = question
 
+    init_state = {
+        "question": standalone, "documents": [], "generation": "",
+        "used_web_search": False, "trace": [],
+        "strategy": requested_strategy, "embedding": _state["embedding"],
+        "gate": {}, "recommended_strategy": requested_strategy,
+        "clarifying_questions": [], "routed": False, "short_circuit": False,
+    }
     async with _semaphore:
         try:
-            result = await asyncio.to_thread(
-                crag_app.invoke,
-                {"question": standalone, "documents": [], "generation": "", "used_web_search": False, "trace": []},
-            )
+            result = await asyncio.to_thread(crag_app.invoke, init_state)
         except Exception as e:
             return JSONResponse({"error": f"Generation failed: {e}"}, status_code=502)
+
+    trace = result.get("trace", [])
+    gate = result.get("gate", {})
+    routed_strategy = result.get("recommended_strategy")
+
+    # The gate may short-circuit on a vague question: ask, don't answer (no memory write).
+    if result.get("short_circuit"):
+        return {
+            "needs_clarification": True,
+            "clarifying_questions": result.get("clarifying_questions", []),
+            "gate": gate, "routed_strategy": routed_strategy, "routed": bool(result.get("routed")),
+            "answer": "", "sources": [], "used_web_search": False,
+            "standalone_question": standalone if standalone != question else None,
+            "trace": trace,
+            "config": {"embedding": _state["embedding"], "strategy": requested_strategy},
+        }
 
     answer = result.get("generation", "")
     used_web = bool(result.get("used_web_search"))
     docs = result.get("documents", [])
-    trace = result.get("trace", [])
 
     memory.add_message(sid, "user", question)
     memory.add_message(sid, "assistant", answer)
@@ -655,9 +806,13 @@ async def ask(req: AskRequest, response: Response, sid: str | None = Cookie(defa
 
     return {
         "answer": answer,
+        "needs_clarification": False,
         "used_web_search": used_web,
         "standalone_question": standalone if standalone != question else None,
         "sources": sources,
         "trace": trace,
-        "config": {"embedding": _state["embedding"], "strategy": _state["strategy"]},
+        "gate": gate,
+        "routed_strategy": routed_strategy,
+        "routed": bool(result.get("routed")),
+        "config": {"embedding": _state["embedding"], "strategy": requested_strategy},
     }

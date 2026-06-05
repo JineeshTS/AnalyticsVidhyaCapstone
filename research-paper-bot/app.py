@@ -72,11 +72,25 @@ async def on_message(message: cl.Message):
         )
 
     # 2. Run the Corrective RAG graph (blocking call off the event loop).
-    thinking = cl.Message(content="Searching the papers...")
+    thinking = cl.Message(content="Analysing the question…")
     await thinking.send()
-    result = await cl.make_async(crag_app.invoke)(
-        {"question": question, "documents": [], "generation": "", "used_web_search": False}
-    )
+    init_state = {
+        "question": question, "documents": [], "generation": "",
+        "used_web_search": False, "trace": [],
+        "strategy": config.DEFAULT_STRATEGY, "embedding": config.DEFAULT_EMBEDDING,
+        "gate": {}, "recommended_strategy": config.DEFAULT_STRATEGY,
+        "clarifying_questions": [], "routed": False, "short_circuit": False,
+    }
+    result = await cl.make_async(crag_app.invoke)(init_state)
+
+    # The pre-RAG gate may ask for clarification instead of answering a vague question.
+    if result.get("short_circuit"):
+        qs = result.get("clarifying_questions") or []
+        body = "I can answer that better with a bit more detail:\n\n" + "\n".join(f"- {q}" for q in qs)
+        memory.add_message(session_id, "user", message.content)
+        await cl.Message(content=body).send()
+        return
+
     answer = result["generation"]
     used_web = result["used_web_search"]
     docs = result["documents"]

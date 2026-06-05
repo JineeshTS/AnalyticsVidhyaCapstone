@@ -23,6 +23,7 @@ chainlit==2.11.1
 rank-bm25==0.2.2
 PyMuPDF==1.27.2.3
 ddgs==9.14.4
+requests>=2.31          # web-search providers (Brave / Serper); also a transitive dep
 python-dotenv==1.2.2
 pydantic==2.13.4
 

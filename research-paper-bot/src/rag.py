@@ -46,27 +46,41 @@ def format_context(docs: List[Document]) -> str:
 
 
 def format_sources(docs: List[Document], top_n: int = config.TOP_SOURCES) -> List[Dict]:
-    """Compact source records for display to the user."""
+    """Compact source records for display to the user.
+
+    Includes a relevance score only when the retrieval path actually produced one
+    (e.g. the cross-encoder reranker writes `relevance_score`); otherwise the UI
+    shows the rank instead — we never fabricate a score.
+    """
     sources = []
-    for d in docs[:top_n]:
+    for i, d in enumerate(docs[:top_n], 1):
+        meta = d.metadata or {}
+        score = meta.get("relevance_score", meta.get("score"))
         sources.append(
             {
-                "title": config.display_title(d.metadata.get("source", ""), d.metadata.get("title", "Unknown")),
-                "page": d.metadata.get("page_number", "?"),
-                "source": d.metadata.get("source", ""),
+                "rank": i,
+                "title": config.display_title(meta.get("source", ""), meta.get("title", "Unknown")),
+                "page": meta.get("page_number", "?"),
+                "source": meta.get("source", ""),
+                "score": round(float(score), 3) if isinstance(score, (int, float)) else None,
                 "snippet": d.page_content[:300].strip(),
             }
         )
     return sources
 
 
-def get_llm() -> BaseChatModel:
-    """Return the configured LLM backend (Claude CLI by default, OpenAI optional)."""
+def get_llm(model: str | None = None) -> BaseChatModel:
+    """Return the configured LLM backend (Claude CLI by default, OpenAI optional).
+
+    `model` optionally overrides the model for this instance — used to run the
+    cheap/fast query gate on a smaller model than the generator (config.GATE_MODEL)
+    while generation stays on config.CLAUDE_MODEL.
+    """
     if config.LLM_BACKEND == "claude_cli":
         from src.claude_llm import ClaudeCLIChat
 
         return ClaudeCLIChat(
-            model=config.CLAUDE_MODEL,
+            model=model or config.CLAUDE_MODEL,
             timeout=config.CLAUDE_TIMEOUT,
             claude_bin=config.CLAUDE_BIN,
         )

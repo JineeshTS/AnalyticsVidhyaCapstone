@@ -18,7 +18,7 @@ Built for the **Analytics Vidhya Generative AI Pinnacle** capstone. It covers
   `gemini-embedding-001` (free tier). OpenAI `text-embedding-3-small` is also
   wired in and works if an OpenAI key is supplied.
 - Compares **retrieval strategies**: plain dense cosine → hybrid (dense + BM25)
-  → hybrid + cross-encoder reranker.
+  → hybrid + cross-encoder reranker (and four more — see below).
 - Connects the vector DB to an LLM in a full RAG pipeline. **The LLM runs through
   a local `claude` CLI backend** (`src/claude_llm.py`) — no paid API, $0 per call.
   Switch to OpenAI any time with `LLM_BACKEND=openai`.
@@ -34,7 +34,27 @@ Built for the **Analytics Vidhya Generative AI Pinnacle** capstone. It covers
    with follow-up questions condensed against the conversation.
 3. **Agentic Corrective RAG** — a LangGraph state machine that grades retrieved
    chunks and, when they're not relevant, rewrites the query and falls back to a
-   DuckDuckGo **web search** before answering.
+   **web search** before answering.
+
+**Beyond the brief (post-review enhancements)**
+- **Pre-RAG query gate** — before retrieval, a fast (haiku) LLM classifies the
+  question, **routes** it to the best strategy by query shape, and **asks a
+  clarifying question instead of guessing** when the question is too vague. Runs
+  on the cheap model, and fails open. Pick **`auto`** in the UI to let it route.
+- **Seven retrieval strategies** — `dense`, `hybrid`, `hybrid_rerank`, `mmr`,
+  `multi_query`, `hyde`, and our own **`adaptive_hybrid`** (query-shape-aware
+  BM25↔dense weighting + MMR diversity, no extra LLM call). See
+  `config.STRATEGY_REGISTRY` / `src/retrievers.py`.
+- **Enriched citations** — every answer links each source to the **PDF opened at
+  the cited page**, with the cross-encoder relevance score (when reranking).
+- **Pluggable web search** — provider layer (`WEB_SEARCH_PROVIDER`): DuckDuckGo
+  (free, default), Brave or Serper (free tiers), auto-falling back to DuckDuckGo.
+  *SerpAPI is intentionally unsupported — it is paid, breaking the zero-spend goal.*
+- **Two UIs, one engine** — the FastAPI explorer embeds the Chainlit chat app
+  under its own tab, plus a rebuilt "How it works" (architecture diagram +
+  design-rationale FAQ) and clickable stack tiles that explain each choice.
+- **Live multi-PDF upload** — drop several PDFs at once; they're chunked,
+  embedded and queryable immediately (one atomic index rebuild for the batch).
 
 ---
 

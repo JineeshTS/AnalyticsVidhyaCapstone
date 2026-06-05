@@ -71,11 +71,22 @@
   .user{align-items:flex-end}.user .bubble{background:var(--user);max-width:90%}
   .bot .bubble{background:var(--panel);border:1px solid var(--line)}
   .badge{display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:20px;margin-bottom:5px;background:var(--web);color:var(--webtext);border:1px solid #2f5e49}
+  .badge.route{background:#211c3a;color:#c9b8ff;border-color:#463a72;margin-right:5px}
   .rewrite{font-size:10.5px;color:var(--faint);margin-bottom:5px;font-style:italic}
+  /* clarification (pre-RAG gate) */
+  .clarify .cltitle{font-weight:650;font-size:13px;margin-bottom:6px}
+  .clarify .clq{font-size:12.5px;color:var(--text);line-height:1.5;margin:3px 0}
+  .clarify .clreason{font-size:10.5px;color:var(--faint);font-style:italic;margin-top:7px;line-height:1.4}
+  .clarify .clhint{font-size:11px;color:var(--muted);margin-top:7px}
   .sources{margin-top:8px;display:flex;flex-direction:column;gap:6px}
   .src{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11.5px}
   .src .t{font-weight:600;color:var(--accent)}.src .p{color:var(--faint);font-size:10.5px;margin-left:5px}
   .src .snip{color:var(--muted);margin-top:3px;font-size:11px;line-height:1.4}
+  .src .meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:2px}
+  .src .sbadge{font-size:9.5px;font-family:ui-monospace,monospace;color:var(--faint);border:1px solid var(--line);border-radius:9px;padding:0 6px}
+  .src .sbadge.sc{color:var(--warn);border-color:#5a4a1f}
+  .src .pdf{font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:9px;padding:1px 7px;white-space:nowrap;margin-left:auto}
+  .src .pdf:hover{color:var(--text);border-color:var(--accent)}
   .typing{color:var(--muted);font-style:italic}
   /* answer trace */
   details.trace{margin-top:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);overflow:hidden}
@@ -207,7 +218,67 @@
   .codeview .cbar{position:sticky;top:0;background:var(--panel2);border-bottom:1px solid var(--line);padding:8px 12px;font-size:12px;font-family:ui-monospace,monospace;color:var(--muted)}
   pre{margin:0}pre code{font-size:12.5px;line-height:1.55;font-family:ui-monospace,Menlo,Consolas,monospace}
   .err{color:#ff8a8a}
+  /* chainlit embed */
+  .clframe{margin-top:6px;border:1px solid var(--line);border-radius:13px;overflow:hidden;background:var(--panel);height:calc(100vh - 300px);min-height:420px}
+  .clframe iframe{width:100%;height:100%;border:0;display:block;background:#fff}
+  code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em;color:var(--accent)}
   @media(max-width:1080px){.ws{grid-template-columns:60px 1fr 320px}nav button span.t{display:none}.cols{grid-template-columns:1fr 1fr}}
+  /* help tooltip */
+  .help{display:inline-grid;place-items:center;width:14px;height:14px;border-radius:50%;border:1px solid var(--line);
+       color:var(--faint);font-size:9px;cursor:help;margin-left:5px;position:relative;vertical-align:middle;font-weight:700}
+  .help:hover{color:var(--accent);border-color:var(--accent)}
+  .help::after{content:attr(data-tip);position:absolute;bottom:140%;left:50%;transform:translateX(-50%);
+       width:230px;background:#0a0d15;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;
+       color:var(--muted);line-height:1.45;font-weight:400;text-align:left;opacity:0;pointer-events:none;transition:.12s;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  .help:hover::after{opacity:1}
+  .card.clickable{cursor:pointer}.card.clickable:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .card .more{font-size:10.5px;color:var(--accent);margin-top:9px;opacity:.8}
+  /* modal */
+  .modal{position:fixed;inset:0;background:rgba(5,7,12,.72);backdrop-filter:blur(3px);display:none;
+       place-items:center;z-index:100;padding:24px}
+  .modal.show{display:grid}
+  .modalbox{background:var(--panel);border:1px solid var(--line);border-radius:16px;max-width:600px;width:100%;
+       max-height:86vh;overflow-y:auto;box-shadow:0 24px 70px rgba(0,0,0,.6)}
+  .modalhd{position:sticky;top:0;background:linear-gradient(180deg,var(--panel),rgba(20,24,36,.96));
+       border-bottom:1px solid var(--line);padding:16px 18px;display:flex;align-items:flex-start;gap:10px}
+  .modalhd .role{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+  .modalhd .name{font-size:17px;font-weight:700;margin-top:2px}
+  .modalhd .x{margin-left:auto;background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+       border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px;flex:none}
+  .modalhd .x:hover{color:var(--text);border-color:var(--accent)}
+  .modalbody{padding:16px 18px}
+  .mdsec{margin-bottom:15px}
+  .mdsec .h{font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;font-weight:600}
+  .mdsec p{margin:0;font-size:13px;color:var(--text);line-height:1.55}
+  .mdsec ul{margin:0;padding-left:18px}.mdsec li{font-size:12.5px;color:var(--muted);line-height:1.5;margin:3px 0}
+  .mdsec.why p{color:var(--text)}
+  .mdsec .alt{display:flex;gap:7px;align-items:flex-start;font-size:12px;color:var(--muted);line-height:1.45;margin:4px 0}
+  .mdsec .alt::before{content:"vs";color:var(--faint);font-size:10px;border:1px solid var(--line);border-radius:6px;padding:0 5px;flex:none;margin-top:1px}
+  /* architecture diagram */
+  .arch{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;margin:6px 0 8px}
+  .anode{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:10px 12px;min-width:120px;flex:1;position:relative}
+  .anode .an{font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+  .anode .at{font-size:12.5px;font-weight:650;margin-top:2px}
+  .anode .ad{font-size:10.5px;color:var(--muted);margin-top:3px;line-height:1.35}
+  .anode.gate{border-color:#463a72}.anode.gen{border-color:#2f5e49}
+  .aarrow{display:grid;place-items:center;color:var(--faint);font-size:16px;padding:0 4px;flex:none}
+  .abranch{font-size:10.5px;color:var(--faint);margin:6px 0 0;padding-left:4px}
+  /* faq */
+  details.faq{border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:8px;overflow:hidden}
+  details.faq>summary{cursor:pointer;padding:12px 14px;font-size:13.5px;font-weight:600;list-style:none;display:flex;align-items:center;gap:8px}
+  details.faq>summary::-webkit-details-marker{display:none}
+  details.faq>summary::before{content:"▸";color:var(--accent);font-size:11px;transition:.15s}
+  details.faq[open]>summary::before{transform:rotate(90deg)}
+  details.faq[open]>summary{border-bottom:1px solid var(--line)}
+  .faqbody{padding:12px 14px;font-size:12.5px;color:var(--muted);line-height:1.6}
+  .faqbody b{color:var(--text)}.faqbody ul{padding-left:18px;margin:6px 0}
+  .promptcard{cursor:default}
+  details.pcard{background:var(--panel);border:1px solid var(--line);border-radius:11px;margin-bottom:9px;overflow:hidden}
+  details.pcard>summary{cursor:pointer;padding:12px 14px;list-style:none}
+  details.pcard>summary::-webkit-details-marker{display:none}
+  details.pcard .nm{font-weight:650;font-size:13.5px}details.pcard .rl{color:var(--muted);font-size:12px;margin-top:2px}
+  details.pcard[open]>summary{border-bottom:1px solid var(--line)}
+  details.pcard pre{white-space:pre-wrap;font-size:11.5px;color:var(--text);background:var(--panel3);border:0;border-radius:0;padding:12px 14px;line-height:1.5;overflow:auto;margin:0}
 </style>
 </head>
 <body>
@@ -229,6 +300,7 @@
     <button data-tab="inspect"><span class="ic">🔍</span><span class="t">Inspector</span></button>
     <button data-tab="how"><span class="ic">🧠</span><span class="t">How it works</span></button>
     <button data-tab="stack"><span class="ic">🧩</span><span class="t">Stack</span></button>
+    <button data-tab="chainlit"><span class="ic">🤖</span><span class="t">Chainlit</span></button>
     <button data-tab="code"><span class="ic">📄</span><span class="t">Code</span></button>
     <div class="navfoot">Zero-API-cost RAG<br>powered by a local Claude CLI.</div>
   </nav>
@@ -256,9 +328,9 @@
     <!-- CORPUS -->
     <section class="tab" id="tab-corpus"><div class="wrap">
       <h2>Corpus</h2>
-      <p class="sub">Drop a PDF to watch it get chunked, embedded and indexed live — then it's instantly queryable in Chat and the Inspector.</p>
-      <div class="drop" id="drop">📄 <b>Drop a PDF here</b> or click to choose &nbsp;·&nbsp; max 25 MB
-        <input type="file" id="fileInput" accept="application/pdf" style="display:none" /></div>
+      <p class="sub">Drop one or more PDFs to watch them get chunked, embedded and indexed live — then they're instantly queryable in Chat and the Inspector.</p>
+      <div class="drop" id="drop">📄 <b>Drop PDFs here</b> or click to choose &nbsp;·&nbsp; multiple allowed &nbsp;·&nbsp; max 25 MB each
+        <input type="file" id="fileInput" accept="application/pdf" multiple style="display:none" /></div>
       <div class="steps" id="steps"></div>
       <div class="row" style="margin-top:18px"><h2 style="margin:0">Indexed documents</h2>
         <span class="sub" id="corpusTotals" style="margin:0 auto 0 8px"></span>
@@ -288,10 +360,52 @@
     <!-- HOW IT WORKS -->
     <section class="tab" id="tab-how"><div class="wrap">
       <h2>How it works</h2>
-      <p class="sub">The exact pipeline, the real prompts sent to the LLM, and the config — nothing hidden.</p>
-      <h3 style="font-size:14px;margin:14px 0 6px">Pipeline (Corrective RAG · LangGraph)</h3>
-      <div id="pipeline"></div>
-      <h3 style="font-size:14px;margin:20px 0 6px">Prompts sent to the LLM</h3>
+      <p class="sub">The whole pipeline, the real prompts, and the design decisions — laid out to answer the questions an evaluator would ask. Nothing hidden. Hover any <span class="help" data-tip="Like this — hover the ? icons for a plain-English definition.">?</span> for a definition.</p>
+
+      <h3 style="font-size:14px;margin:14px 0 8px">Architecture — agentic Corrective RAG <span class="help" data-tip="Corrective RAG: the system grades its own retrieved context and corrects course (web fallback) instead of answering from weak evidence.">?</span> on LangGraph <span class="help" data-tip="LangGraph compiles the flow into a state machine of nodes and conditional edges — so branching and early-exit are explicit and auditable.">?</span></h3>
+      <div class="arch">
+        <div class="anode"><div class="an">input</div><div class="at">Question</div><div class="ad">+ chat history, condensed to a standalone question</div></div>
+        <div class="aarrow">→</div>
+        <div class="anode gate"><div class="an">0 · Gate</div><div class="at">Analyse query <span class="help" data-tip="A fast haiku-model classifier. Decides quality (clear/vague), query type, and which retrieval strategy fits — or asks you to clarify.">?</span></div><div class="ad">classify · route strategy · clarify if vague</div></div>
+        <div class="aarrow">→</div>
+        <div class="anode"><div class="an">1 · Retrieve</div><div class="at">Fetch chunks <span class="help" data-tip="Runs the chosen strategy over the Chroma vectors (+ BM25 keyword for hybrid ones).">?</span></div><div class="ad">dense / hybrid / rerank / mmr / multi-query / hyde / adaptive</div></div>
+        <div class="aarrow">→</div>
+        <div class="anode"><div class="an">2 · Grade</div><div class="at">Judge relevance <span class="help" data-tip="An LLM grades each retrieved chunk yes/no for whether it truly helps answer the question — keyword overlap alone is rejected.">?</span></div><div class="ad">keep only chunks that really help</div></div>
+        <div class="aarrow">→</div>
+        <div class="anode gen"><div class="an">6 · Generate</div><div class="at">Cited answer</div><div class="ad">Claude answers only from kept context, with sources</div></div>
+      </div>
+      <div class="abranch">↳ <b>Branch A</b> — if the gate finds the question too vague: it <b>stops and asks clarifying questions</b> (no retrieval, no guess).<br>↳ <b>Branch B</b> — if grading keeps <b>zero</b> relevant chunks: <b>4 · Rewrite</b> → <b>5 · Web search</b> <span class="help" data-tip="Only fires when the papers can't answer. Pluggable provider; DuckDuckGo by default (free). Lets it answer newer work like Mamba (2023).">?</span> → generate, flagged 🌐.</div>
+
+      <h3 style="font-size:14px;margin:22px 0 8px">Design decisions <span class="sub" style="font-weight:400">— the questions evaluators ask</span></h3>
+      <div id="faq">
+        <details class="faq"><summary>Why Chroma DB <span class="help" data-tip="A vector database stores embeddings and finds the nearest ones to a query vector.">?</span> and not FAISS / Pinecone / Elasticsearch?</summary><div class="faqbody">
+          <b>Embedded &amp; zero-ops.</b> Chroma runs in-process and persists to local disk — no database server to operate on the VPS, which keeps the project self-contained and $0. It integrates first-class with LangChain, supports metadata filtering and MMR natively, and lets us keep <b>one collection per embedding model</b> so the required open-source-vs-commercial comparison is a clean head-to-head.
+          <ul><li><b>FAISS</b> — fast but lower-level: no built-in persistence or metadata ergonomics.</li><li><b>pgvector</b> — needs a running Postgres.</li><li><b>Pinecone / Weaviate</b> — hosted: network latency, API keys, cost → breaks zero-spend.</li><li><b>Elasticsearch / OpenSearch</b> — great for keyword+vector <i>at scale</i>, but heavyweight to run; we get the keyword signal in-process via BM25 instead. (Open the Stack tab → Vector DB tile for the full comparison.)</li></ul>
+        </div></details>
+        <details class="faq"><summary>Why hybrid retrieval <span class="help" data-tip="Hybrid = dense semantic search + BM25 keyword search, fused with Reciprocal Rank Fusion.">?</span> instead of pure vector search?</summary><div class="faqbody">
+          Embeddings capture <b>meaning</b> but smear <b>exact tokens</b> — acronyms and rare terms like “NSP”, “BLEU”, “GPT-3”. <b>BM25</b> <span class="help" data-tip="A classic sparse keyword-ranking function scoring exact term overlap.">?</span> nails those. Fusing both with <b>RRF</b> <span class="help" data-tip="Reciprocal Rank Fusion blends two ranked lists by summing 1/(rank) — no score calibration needed.">?</span> beat pure dense for <i>every</i> embedding in our benchmark, so <b>bge + hybrid</b> is the live default.
+        </div></details>
+        <details class="faq"><summary>What are all the strategies — and what makes “Adaptive Hybrid” <i>ours</i>?</summary><div class="faqbody">
+          Seven, selectable live: <b>dense</b>, <b>hybrid</b>, <b>hybrid_rerank</b> <span class="help" data-tip="Hybrid candidates re-scored by a cross-encoder that reads query+passage together.">?</span>, <b>mmr</b> <span class="help" data-tip="Max-Marginal-Relevance: trades a little relevance for diversity, cutting near-duplicate chunks.">?</span>, <b>multi_query</b> <span class="help" data-tip="An LLM expands your question into several paraphrases, retrieves each, and fuses — better recall.">?</span>, <b>hyde</b> <span class="help" data-tip="HyDE: the LLM drafts a hypothetical answer, we embed THAT and retrieve against it — helps vague wording.">?</span>, and our own <b>adaptive_hybrid</b>: it reads the <i>shape</i> of your query (acronym / short / quoted → lean keyword; long / conceptual → lean semantic), sets the BM25↔dense weights accordingly, then applies MMR for diversity — with <b>no extra LLM call</b>. The <b>Auto</b> mode lets the query gate pick the strategy per question.
+        </div></details>
+        <details class="faq"><summary>Why a pre-RAG query gate that asks clarifying questions?</summary><div class="faqbody">
+          Garbage-in, garbage-out: retrieving for “tell me about models” returns noise. The gate quality-checks the prompt <i>before</i> searching. If it's too vague it <b>asks a clarifying question instead of guessing</b>; if it's clear it <b>routes</b> to the best strategy (the keyword-vs-vector decision the mentors asked about). One cheap haiku call, and it <b>fails open</b> — any gate error just proceeds as a normal clear question.
+        </div></details>
+        <details class="faq"><summary>How do you guarantee answers are grounded — no hallucination?</summary><div class="faqbody">
+          Three locks: (1) the generation prompt forbids answering outside the retrieved context (“say you don't know”); (2) the CRAG <b>grader</b> drops chunks that don't really help <i>before</i> generation; (3) every answer ships the <b>exact source + page</b> it used, and you can expand the trace to read the precise context sent to the model. If the papers can't cover it, it switches to web search and flags it 🌐 — it never silently invents.
+        </div></details>
+        <details class="faq"><summary>Why run Claude locally via the CLI?</summary><div class="faqbody">
+          Generation, grading, the gate and the rewriter all go through the host's <b>local <code>claude</code> CLI</b> on the Claude Max plan — <b>$0 per-query API cost</b>, no API key in the app, and the papers never leave the box. The gate runs on the cheaper <b>haiku</b> model to stay fast.
+        </div></details>
+        <details class="faq"><summary>Why did the cross-encoder reranker <i>hurt</i> here?</summary><div class="faqbody">
+          A cross-encoder <span class="help" data-tip="Scores a query and passage jointly — more accurate than comparing independent embeddings, but slower.">?</span> is usually more accurate, but on this tiny <b>6-paper</b> corpus it over-trims context to a few chunks and drops passages the answer needed — so it scored <i>lower</i> than plain hybrid in our benchmark. We keep it selectable (with real scores shown) for transparency, but it isn't the default. Honest results &gt; a fancier-sounding pipeline.
+        </div></details>
+        <details class="faq"><summary>How is multi-user memory isolated?</summary><div class="faqbody">
+          Each browser session gets its own id (cookie) and an isolated history row-set in SQLite. Follow-ups like “and what about BERT?” are <b>condensed</b> into a standalone question against <i>that</i> session's history before retrieval — context carries across turns without leaking between users.
+        </div></details>
+      </div>
+
+      <h3 style="font-size:14px;margin:22px 0 8px">Prompts sent to the LLM <span class="sub" style="font-weight:400">— click to expand</span></h3>
       <div id="prompts"></div>
       <h3 style="font-size:14px;margin:20px 0 6px">Configuration</h3>
       <div id="cfgknobs"></div>
@@ -302,6 +416,25 @@
       <h2>Model &amp; tech stack</h2>
       <p class="sub">Exactly what powers each part of the pipeline. The active embedding/strategy are highlighted.</p>
       <div class="cards" id="stackCards"></div>
+    </div></section>
+
+    <!-- CHAINLIT -->
+    <section class="tab" id="tab-chainlit"><div class="wrap" style="max-width:none">
+      <div class="row" style="justify-content:space-between;align-items:flex-end">
+        <div>
+          <h2>Chainlit interface</h2>
+          <p class="sub" style="margin-bottom:0;max-width:760px">The <b>same RAG engine</b>, exposed through a second UI — the original Chainlit chat app we submitted for review. It runs the identical Corrective-RAG core (retrieve → grade → web-fallback → generate) with per-session memory; only the front-end differs.</p>
+        </div>
+        <a class="btn" href="/chat" target="_blank" rel="noopener" style="white-space:nowrap">↗ Open in new tab</a>
+      </div>
+      <div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(230px,1fr));margin:14px 0 4px">
+        <div class="card"><div class="role">Same core</div><div class="name">One RAG engine</div><div class="note">Chainlit and this FastAPI explorer both call the same <code>src/crag.py</code> LangGraph app — no duplicated logic.</div></div>
+        <div class="card"><div class="role">Stretch goal</div><div class="name">Conversational UI</div><div class="note">Streaming chat with the agentic Corrective-RAG, built on Chainlit's event model.</div></div>
+        <div class="card"><div class="role">Multi-user</div><div class="name">Per-session memory</div><div class="note">Each browser session gets isolated history (SQLite); follow-ups are condensed into standalone questions before retrieval.</div></div>
+        <div class="card"><div class="role">Sources</div><div class="name">Cited answers</div><div class="note">Every answer surfaces the paper + page it used, and falls back to a live web search when the corpus can't cover it.</div></div>
+      </div>
+      <div class="clframe"><iframe id="chainlitFrame" title="Chainlit app" loading="lazy"></iframe></div>
+      <p class="sub" style="margin-top:8px;font-size:11.5px;color:var(--faint)">Embedded live from <code>/chat</code> on this same domain. If it doesn't load in the frame, use “Open in new tab”.</p>
     </div></section>
 
     <!-- CODE -->
@@ -345,6 +478,15 @@
   </aside>
 </div>
 
+<!-- shared detail modal (Stack tiles, etc.) -->
+<div class="modal" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modalbox" role="dialog" aria-modal="true">
+    <div class="modalhd"><div><div class="role" id="modalRole"></div><div class="name" id="modalName"></div></div>
+      <button class="x" onclick="closeModal()" aria-label="Close">✕</button></div>
+    <div class="modalbody" id="modalBody"></div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" onerror="window.__nohl=1"></script>
 <script>
 const $=s=>document.querySelector(s);
@@ -357,7 +499,11 @@ function showTab(name){
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id==='tab-'+name));
   if(name==='corpus')loadCorpus(); if(name==='stack')loadStack();
   if(name==='code')loadCodeList(); if(name==='criteria')loadCriteria();
-  if(name==='how')loadHow();
+  if(name==='how')loadHow(); if(name==='chainlit')loadChainlit();
+}
+function loadChainlit(){
+  const f=document.getElementById('chainlitFrame');
+  if(f&&!f.src)f.src='/chat';   // lazy: only spin up the Chainlit session when the tab is first opened
 }
 function flashChat(){
   const rail=document.querySelector('.rail');if(!rail)return;
@@ -367,8 +513,8 @@ function flashChat(){
 }
 async function loadHow(){
   const d=await (await fetch('/api/prompts')).json();
-  $('#pipeline').innerHTML='<div class="pipe">'+d.pipeline.map((s,i)=>`<div class="pstep"><span class="n">${i+1}</span><span>${esc(s)}</span></div>`).join('')+'</div>';
-  $('#prompts').innerHTML=d.prompts.map(p=>`<div class="promptcard"><div class="nm">${esc(p.name)}</div><div class="rl">${esc(p.role)}</div><pre>${esc(p.text)}</pre></div>`).join('');
+  // Prompts as collapsible cards (summary = name + role) so they aren't a wall of text.
+  $('#prompts').innerHTML=d.prompts.map(p=>`<details class="pcard"><summary><div class="nm">${esc(p.name)}</div><div class="rl">${esc(p.role)}</div></summary><pre>${esc(p.text)}</pre></details>`).join('');
   $('#cfgknobs').innerHTML='<div class="knobs">'+Object.entries(d.config).map(([k,v])=>`<div class="knob"><div class="kk">${esc(k)}</div><div class="kv">${esc(String(v))}</div></div>`).join('')+'</div>';
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
@@ -379,8 +525,10 @@ async function loadInfo(){
   const emb=$('#selEmb'),strat=$('#selStrat'),iemb=$('#iEmb');emb.innerHTML='';iemb.innerHTML='';strat.innerHTML='';
   d.options.embeddings.forEach(e=>{const o=new Option(e.name+(e.ready?'':' (none)'),e.name);o.disabled=!e.ready;
     emb.add(o.cloneNode(true));iemb.add(o);});
-  d.options.strategies.forEach(s=>strat.add(new Option(s,s)));
-  emb.value=d.config.embedding;strat.value=d.config.strategy;iemb.value=d.config.embedding;
+  window.__stratReg=d.options.strategy_registry||{};
+  if(d.options.auto_available)strat.add(new Option('⚡ Auto (smart routing)','auto'));
+  d.options.strategies.forEach(s=>{const r=window.__stratReg[s];strat.add(new Option(r&&r.label?r.label:s,s));});
+  emb.value=d.config.embedding;strat.value=window.__askStrategy||d.config.strategy;iemb.value=d.config.embedding;
   $('#mCorpus').textContent=d.total_docs+' docs · '+d.total_chunks+' chunks';
   hdr(d.config);
 }
@@ -388,11 +536,18 @@ function hdr(c){$('#hEmb').textContent=c.embedding;$('#hStrat').textContent=c.st
 fetch('/api/info').then(r=>r.json()).then(d=>{$('#hLlm').textContent=d.llm.model;$('#mLlm').textContent='Claude '+d.llm.model;});
 loadInfo();
 async function applyConfig(){
+  const strat=$('#selStrat').value, emb=$('#selEmb').value;
   $('#cfgState').textContent='switching…';
+  // "auto" is a per-request router (the gate picks the strategy), not a persisted
+  // default — so we only persist the embedding and remember auto client-side.
+  const body=strat==='auto'?{embedding:emb}:{embedding:emb,strategy:strat};
   const d=await (await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({embedding:$('#selEmb').value,strategy:$('#selStrat').value})})).json();
+    body:JSON.stringify(body)})).json();
   if(d.error){$('#cfgState').textContent=d.error;return;}
-  hdr(d);$('#cfgState').textContent='✓ ready';setTimeout(()=>$('#cfgState').textContent='',1500);
+  window.__askStrategy=(strat==='auto')?'auto':null;
+  hdr(d);
+  if(strat==='auto')$('#hStrat').textContent='auto ⚡';
+  $('#cfgState').textContent='✓ ready';setTimeout(()=>$('#cfgState').textContent='',1500);
 }
 
 // chat
@@ -406,25 +561,52 @@ async function ask(text){
   addMsg('You','user').textContent=question;
   const bot=addMsg('Bot','bot');bot.innerHTML='<span class="typing">Searching…</span>';
   try{
-    const res=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question})});
+    const body={question};if(window.__askStrategy)body.strategy=window.__askStrategy;
+    const res=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await res.json();
     if(!res.ok){bot.innerHTML='<span class="err">'+esc(d.error||'Error')+'</span>';return;}
+    // Pre-RAG gate asked for clarification instead of answering a vague question.
+    if(d.needs_clarification){
+      let h='<div class="clarify"><div class="cltitle">🤔 Let me make sure I answer the right thing</div>';
+      h+=(d.clarifying_questions||[]).map(q=>'<div class="clq">• '+esc(q)+'</div>').join('');
+      if(d.gate&&d.gate.reasoning)h+='<div class="clreason">Why I’m asking: '+esc(d.gate.reasoning)+'</div>';
+      h+='<div class="clhint">↳ Reply with a more specific question and I’ll search the papers.</div>';
+      if(d.trace&&d.trace.length)h+=traceHtml(d.trace);
+      bot.innerHTML=h+'</div>';qBox.focus();return;
+    }
     let h='';
     if(d.standalone_question)h+='<div class="rewrite">↳ '+esc(d.standalone_question)+'</div>';
+    if(d.routed&&d.routed_strategy){const lbl=(window.__stratReg[d.routed_strategy]||{}).label||d.routed_strategy;
+      h+='<div class="badge route" title="The query gate auto-picked this retrieval strategy from your question’s shape.">🧭 auto-routed → '+esc(lbl)+'</div>';}
     if(d.used_web_search)h+='<div class="badge">🌐 web search</div>';
     h+='<div>'+esc(d.answer)+'</div>';
-    if(d.sources&&d.sources.length){h+='<div class="sources">';
-      for(const s of d.sources){const web=s.page==='web';const t=esc(s.title);
-        const loc=web?'':'<span class="p">p'+esc(s.page)+'</span>';
-        const link=web&&s.source?'<a href="'+esc(s.source)+'" target="_blank" rel="noopener">'+t+'</a>':t;
-        h+='<div class="src"><span class="t">'+link+'</span>'+loc+'<div class="snip">'+esc(s.snippet||'')+'</div></div>';}
-      h+='</div>';}
+    if(d.sources&&d.sources.length)h+=renderSources(d.sources);
     if(d.trace&&d.trace.length)h+=traceHtml(d.trace);
     bot.innerHTML=h;
   }catch(e){bot.innerHTML='<span class="err">Network error</span>';}
   finally{sendBtn.disabled=false;qBox.focus();chat.scrollTop=chat.scrollHeight;}
 }
 
+function renderSources(sources){
+  let h='<div class="sources">';
+  for(const s of sources){
+    const web=s.page==='web';
+    const t=esc(s.title);
+    // Title links straight to the evidence: the PDF opened at the cited page (papers) or the URL (web).
+    const href=web?(s.source||''):('/api/document?source='+encodeURIComponent(s.source||'')+'#page='+encodeURIComponent(s.page));
+    const title=(web&&!s.source)?t:'<a href="'+esc(href)+'" target="_blank" rel="noopener">'+t+'</a>';
+    const badges=[];
+    if(!web)badges.push('<span class="sbadge">p'+esc(s.page)+'</span>');
+    if(s.score!=null)badges.push('<span class="sbadge sc" title="cross-encoder relevance score">score '+esc(s.score)+'</span>');
+    else if(s.rank!=null)badges.push('<span class="sbadge" title="rank in the retrieved set">#'+esc(s.rank)+'</span>');
+    const pdf=web?(s.source?'<a class="pdf" href="'+esc(s.source)+'" target="_blank" rel="noopener">🌐 open ↗</a>':'')
+                 :'<a class="pdf" href="'+esc(href)+'" target="_blank" rel="noopener">📄 View PDF ↗</a>';
+    h+='<div class="src"><span class="t">'+title+'</span>'+
+       '<div class="meta">'+badges.join('')+pdf+'</div>'+
+       '<div class="snip">'+esc(s.snippet||'')+'</div></div>';
+  }
+  return h+'</div>';
+}
 function docLine(x){return '<span class="tdoc">• '+esc(x.title)+(x.web?' (web)':' · p'+esc(x.page))+'</span>';}
 function traceHtml(trace){
   const total=trace.reduce((a,s)=>a+(s.ms||0),0);
@@ -432,6 +614,10 @@ function traceHtml(trace){
   for(const s of trace){
     h+='<div class="tstep"><div class="tl"><span class="tlab">'+esc(s.label)+'</span>'+(s.ms!=null?'<span class="tms">'+s.ms+' ms</span>':'')+'</div>';
     h+='<div class="td">'+esc(s.detail)+'</div>';
+    if(s.step==='gate'){
+      if(s.routed)h+='<div class="tdoc">🧭 routed: '+esc(s.requested_strategy)+' → <b>'+esc(s.resolved_strategy)+'</b></div>';
+      if(s.reasoning)h+='<div class="rw">'+esc(s.reasoning)+'</div>';
+    }
     if(s.step==='grade'){
       if(s.kept&&s.kept.length)h+='<div class="keep">kept:</div>'+s.kept.map(docLine).join('');
       if(s.dropped&&s.dropped.length)h+='<div class="drop">dropped:</div>'+s.dropped.map(docLine).join('');
@@ -473,26 +659,34 @@ async function toggleChunks(srcEnc,row){
 }
 const drop=$('#drop'),fileInput=$('#fileInput');
 drop.onclick=()=>fileInput.click();
-fileInput.onchange=()=>{if(fileInput.files[0])doUpload(fileInput.files[0]);};
+fileInput.onchange=()=>{if(fileInput.files.length)doUpload(fileInput.files);};
 ['dragover','dragenter'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('over');}));
 ['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('over');}));
-drop.addEventListener('drop',ev=>{const f=ev.dataTransfer.files[0];if(f)doUpload(f);});
+drop.addEventListener('drop',ev=>{const f=ev.dataTransfer.files;if(f.length)doUpload(f);});
 function stepHtml(a){return a.map(s=>`<div class="step ${s.cls}"><span class="ico">${s.ico}</span>${s.txt}</div>`).join('');}
-async function doUpload(file){
+async function doUpload(fileList){
+  const files=[...fileList];
   const box=$('#steps');box.classList.add('show');
-  box.innerHTML=stepHtml([{ico:'⏳',cls:'run',txt:'Uploading <b>'+esc(file.name)+'</b> & parsing pages…'},
+  const names=files.map(f=>esc(f.name)).join(', ');
+  const plural=files.length>1?'s':'';
+  box.innerHTML=stepHtml([{ico:'⏳',cls:'run',txt:'Uploading <b>'+files.length+' file'+plural+'</b> ('+names+') & parsing pages…'},
     {ico:'•',cls:'',txt:'Chunking (1000/150)'},{ico:'•',cls:'',txt:'Embedding + indexing into Chroma'}]);
   try{
-    const fd=new FormData();fd.append('file',file);
+    const fd=new FormData();files.forEach(f=>fd.append('files',f));
     const res=await fetch('/api/upload',{method:'POST',body:fd});const d=await res.json();
-    if(!res.ok){box.innerHTML='<div class="step"><span class="err">✕ '+esc(d.error||'Upload failed')+'</span></div>';return;}
-    const embTxt=d.embeddings.map(e=>e.name+(e.status==='indexed'?' ✓':' ⚠')).join(' · ');
-    let h=stepHtml([{ico:'✓',cls:'done',txt:'Parsed <b>'+esc(d.title)+'</b> — '+d.pages+' pages'},
-      {ico:'✓',cls:'done',txt:'Split into <b>'+d.chunks+' chunks</b>'},
-      {ico:'✓',cls:'done',txt:'Indexed → '+esc(embTxt)},
-      {ico:'🎉',cls:'done',txt:'Ready — ask about it in Chat. Corpus now '+d.total_docs+' docs / '+d.total_chunks+' chunks.'}]);
-    if(d.sample_chunk)h+='<div class="chunkprev"><b>Sample chunk</b> (p'+d.sample_chunk.page+'):<br>'+esc(d.sample_chunk.text)+'…</div>';
-    box.innerHTML=h;loadCorpus();
+    if(!res.ok){box.innerHTML='<div class="step"><span class="err">✕ '+esc((d&&d.error)||'Upload failed')+'</span></div>';return;}
+    let h='',prev='';
+    (d.results||[]).forEach(r=>{
+      if(r.ok){
+        const embTxt=(r.embeddings||[]).map(e=>e.name+(e.status==='indexed'?' ✓':' ⚠')).join(' · ');
+        h+=stepHtml([{ico:'✓',cls:'done',txt:'Parsed <b>'+esc(r.title)+'</b> — '+r.pages+' pages → <b>'+r.chunks+' chunks</b> → '+esc(embTxt)}]);
+        if(r.sample_chunk&&!prev)prev='<div class="chunkprev"><b>Sample chunk</b> · '+esc(r.title)+' (p'+r.sample_chunk.page+'):<br>'+esc(r.sample_chunk.text)+'…</div>';
+      }else{
+        h+=stepHtml([{ico:'✕',cls:'',txt:'<span class="err">'+esc(r.filename)+': '+esc(r.error)+'</span>'}]);
+      }
+    });
+    h+=stepHtml([{ico:'🎉',cls:'done',txt:'Done — <b>'+d.ingested+'</b> added'+(d.failed?(', <b>'+d.failed+'</b> failed'):'')+'. Corpus now '+d.total_docs+' docs / '+d.total_chunks+' chunks. Ask about them in Chat.'}]);
+    box.innerHTML=h+prev;loadCorpus();
   }catch(e){box.innerHTML='<div class="step"><span class="err">Network error</span></div>';}
 }
 async function resetCorpus(){
@@ -542,24 +736,47 @@ async function runCompare(){
 
 // stack
 async function loadStack(){
-  const d=await (await fetch('/api/info')).json();const cards=[];
-  cards.push(card('LLM',d.llm.label,d.llm.role,'',[['act','active']],true));
-  d.embeddings.forEach(e=>{const note=e.label+(e.vectors!=null?` — indexed: ${e.vectors} vectors · ${e.dim}-dim in Chroma`:(e.ready?'':' (not built)'));
-    cards.push(card('Embedding · '+e.name,e.model,note,'',
-    [[e.type==='commercial'?'com':'os',e.type],...(e.active?[['act','active']]:[])],e.active));});
-  cards.push(card('Reranker',d.reranker.model,d.reranker.role,'',[['os','open-source'],...(d.reranker.active?[['act','active']]:[])],d.reranker.active));
-  const cols=(d.vector_db.collections||[]).map(c=>`${c.name}: ${c.vectors} vectors × ${c.dim}-dim`).join(' · ');
-  cards.push(card('Vector DB',d.vector_db.name,d.vector_db.note+(cols?(' — '+cols):'')));
-  cards.push(card('Keyword',d.keyword.name,d.keyword.note));
-  cards.push(card('Web search',d.web_search.name,d.web_search.note));
-  cards.push(card('Orchestration',d.orchestration.name,d.orchestration.note));
+  const d=await (await fetch('/api/info')).json();
+  window.__stack={};const cards=[];
+  const add=(key,role,name,note,tags,active,details,model)=>{
+    window.__stack[key]={role,name,details};
+    cards.push(card(key,role,name,note,model||'',tags,active,details));
+  };
+  add('llm','LLM',d.llm.label,d.llm.role,[['act','active']],true,d.llm.details);
+  d.embeddings.forEach(e=>{const note=e.label+(e.vectors!=null?` — ${e.vectors} vectors · ${e.dim}-dim in Chroma`:(e.ready?'':' (not built)'));
+    add('emb_'+e.name,'Embedding · '+e.name,e.model,note,[[e.type==='commercial'?'com':'os',e.type],...(e.active?[['act','active']]:[])],e.active,e.details);});
+  add('reranker','Reranker',d.reranker.model,d.reranker.role,[['os','open-source'],...(d.reranker.active?[['act','active']]:[])],d.reranker.active,d.reranker.details);
+  const cols=(d.vector_db.collections||[]).map(c=>`${c.name}: ${c.vectors}×${c.dim}d`).join(' · ');
+  add('vector_db','Vector DB',d.vector_db.name,d.vector_db.note+(cols?(' — '+cols):''),[],false,d.vector_db.details);
+  add('keyword','Keyword',d.keyword.name,d.keyword.note,[],false,d.keyword.details);
+  add('web_search','Web search',d.web_search.name,d.web_search.note,[],false,d.web_search.details);
+  add('orchestration','Orchestration',d.orchestration.name,d.orchestration.note,[],false,d.orchestration.details);
   $('#stackCards').innerHTML=cards.join('');
 }
-function card(role,name,note,model,tags,active){
+function card(key,role,name,note,model,tags,active,details){
   const t=(tags||[]).map(([c,l])=>`<span class="tag ${c}">${l}</span>`).join('');
-  return `<div class="card ${active?'active':''}"><div class="role">${esc(role)}</div><div class="name">${esc(name)}</div>`+
-    (model?`<div class="model">${esc(model)}</div>`:'')+`<div class="note">${esc(note||'')}</div>${t}</div>`;
+  const cls='card'+(active?' active':'')+(details?' clickable':'');
+  const onclick=details?` onclick="openStackModal('${key}')"`:'';
+  const more=details?'<div class="more">click for how &amp; why →</div>':'';
+  return `<div class="${cls}"${onclick}><div class="role">${esc(role)}</div><div class="name">${esc(name)}</div>`+
+    (model?`<div class="model">${esc(model)}</div>`:'')+`<div class="note">${esc(note||'')}</div>${t}${more}</div>`;
 }
+// shared detail modal
+function openStackModal(key){const it=window.__stack&&window.__stack[key];if(it)openModal(it.role,it.name,it.details);}
+function openModal(role,name,details){
+  $('#modalRole').textContent=role;$('#modalName').textContent=name;
+  $('#modalBody').innerHTML=detailsHtml(details);$('#modal').classList.add('show');
+}
+function closeModal(){$('#modal').classList.remove('show');}
+function detailsHtml(d){
+  if(!d)return '';let h='';
+  if(d.what)h+='<div class="mdsec"><div class="h">What it is</div><p>'+esc(d.what)+'</p></div>';
+  if(d.how&&d.how.length)h+='<div class="mdsec"><div class="h">How we use it</div><ul>'+d.how.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul></div>';
+  if(d.why)h+='<div class="mdsec why"><div class="h">Why we chose it</div><p>'+esc(d.why)+'</p></div>';
+  if(d.alternatives&&d.alternatives.length)h+='<div class="mdsec"><div class="h">Alternatives considered</div>'+d.alternatives.map(x=>'<div class="alt">'+esc(x)+'</div>').join('')+'</div>';
+  return h;
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
 
 // criteria
 const PROOF={corpus:'Open Corpus →',inspect:'Open Inspector →',how:'See the pipeline →',

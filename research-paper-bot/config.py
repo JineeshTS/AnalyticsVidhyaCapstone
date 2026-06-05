@@ -46,6 +46,11 @@ CLAUDE_BIN = os.getenv("CLAUDE_BIN", "claude")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "sonnet")   # sonnet | haiku | opus
 CLAUDE_TIMEOUT = int(os.getenv("CLAUDE_TIMEOUT", "180"))
 
+# Per-role model overrides. The pre-RAG query gate is a fast classifier, so it
+# runs on a cheaper/faster model by default; generation stays on CLAUDE_MODEL.
+GATE_MODEL = os.getenv("GATE_MODEL", "haiku")
+GRADER_MODEL = os.getenv("GRADER_MODEL", CLAUDE_MODEL)
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
@@ -116,8 +121,26 @@ TOP_K = int(os.getenv("TOP_K", "5"))          # candidates fetched per retriever
 TOP_SOURCES = int(os.getenv("TOP_SOURCES", "3"))  # sources shown to the user
 RERANK_TOP_N = int(os.getenv("RERANK_TOP_N", "3"))  # kept after reranking
 
-# Retrieval strategy: "dense" | "hybrid" | "hybrid_rerank"
+# Retrieval strategy: see STRATEGY_REGISTRY below for the full list.
 DEFAULT_STRATEGY = os.getenv("DEFAULT_STRATEGY", "hybrid_rerank")
+
+# Retrieval-strategy registry — the single source of truth shared by the
+# dispatcher (src/retrievers.py), the API, and the UI dropdowns. "llm_calls" is
+# how many EXTRA LLM calls the strategy itself makes at retrieval time (the CRAG
+# grader/generator are separate and not counted here). "auto" is NOT listed —
+# it is a routing sentinel resolved by the pre-RAG query gate to one of these.
+STRATEGY_REGISTRY = {
+    "dense":           {"label": "Dense",           "blurb": "Pure semantic cosine similarity over the Chroma vectors.",                  "cost": "low",    "llm_calls": 0},
+    "hybrid":          {"label": "Hybrid",          "blurb": "Dense + BM25 keyword search fused with Reciprocal Rank Fusion.",            "cost": "low",    "llm_calls": 0},
+    "hybrid_rerank":   {"label": "Hybrid + Rerank", "blurb": "Hybrid candidates re-scored by a cross-encoder reranker.",                  "cost": "medium", "llm_calls": 0},
+    "mmr":             {"label": "MMR",             "blurb": "Max-Marginal-Relevance over the dense store — diversifies, cuts near-duplicates.", "cost": "low", "llm_calls": 0},
+    "multi_query":     {"label": "Multi-Query",     "blurb": "An LLM expands the question into several paraphrases, then hybrid-fuses the hits.", "cost": "high", "llm_calls": 1},
+    "hyde":            {"label": "HyDE",            "blurb": "An LLM drafts a hypothetical answer; we embed THAT and retrieve against it.", "cost": "high",  "llm_calls": 1},
+    "adaptive_hybrid": {"label": "Adaptive Hybrid", "blurb": "Our own: tilts BM25↔dense weights by query shape, then MMR for diversity. No LLM.", "cost": "low", "llm_calls": 0},
+}
+
+# Strategy names selectable in the app (the registry keys, in order).
+STRATEGY_NAMES = list(STRATEGY_REGISTRY.keys())
 
 # CRAG relevance grading: how many chunks to grade in parallel (each grade is one
 # LLM call). Higher = faster grading but more concurrent `claude` subprocesses.
@@ -127,6 +150,16 @@ GRADE_CONCURRENCY = int(os.getenv("GRADE_CONCURRENCY", "8"))
 # Web search (Corrective RAG fallback)
 # ---------------------------------------------------------------------------
 WEB_SEARCH_RESULTS = int(os.getenv("WEB_SEARCH_RESULTS", "3"))
+
+# Provider for the web-search fallback. "ddg" (DuckDuckGo) is free and needs no
+# key; "brave" and "serper" have generous free tiers but need a key. Whatever is
+# selected, web_search() auto-falls back to DuckDuckGo if the key is missing or
+# the call fails — so the app is never broken by web search. SerpAPI is
+# deliberately NOT supported (paid, breaks the zero-spend posture).
+WEB_SEARCH_PROVIDER = os.getenv("WEB_SEARCH_PROVIDER", "ddg")  # ddg | brave | serper
+BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "")
+SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
+WEB_SEARCH_TIMEOUT = int(os.getenv("WEB_SEARCH_TIMEOUT", "10"))
 
 
 def require_openai_key() -> str:
