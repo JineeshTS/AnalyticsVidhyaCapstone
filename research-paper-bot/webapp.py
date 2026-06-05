@@ -230,10 +230,23 @@ def evaluation() -> dict:
 
         d_emb, d_strat = config.DEFAULT_EMBEDDING, config.DEFAULT_STRATEGY
         d_row = next((r for r in rows if r["embedding"] == d_emb and r["strategy"] == d_strat), None)
-        parts = [
-            f"<b>Hybrid retrieval wins.</b> Fusing keyword search (BM25) with semantic similarity "
-            f"scored highest of all {n_strats} strategies ({strat_avg.get('hybrid', '?')}/5, averaged across embeddings)."
-        ]
+        # Tie-aware leader line (don't claim a sole winner when scores tie).
+        top_avg = max(strat_avg.values())
+        leaders = [s for s in ranked if strat_avg[s] == top_avg]
+        hyb = strat_avg.get("hybrid", "?")
+        _lbl = lambda s: config.STRATEGY_REGISTRY.get(s, {}).get("label", s)
+        if "hybrid" in leaders and len(leaders) > 1:
+            others = ", ".join(_lbl(s) for s in leaders if s != "hybrid")
+            lead = (f"<b>Hybrid retrieval leads.</b> It topped all {n_strats} strategies at {hyb}/5 "
+                    f"(tied with {others}) — and unlike pure semantic search it also catches exact "
+                    f"keywords and acronyms, so it stays the robust default.")
+        elif "hybrid" in leaders:
+            lead = (f"<b>Hybrid retrieval wins.</b> Fusing keyword search (BM25) with semantic similarity "
+                    f"scored highest of all {n_strats} strategies ({hyb}/5, averaged across embeddings).")
+        else:
+            lead = (f"<b>{_lbl(leaders[0])} scored highest</b> ({top_avg}/5 of {n_strats} strategies); "
+                    f"hybrid ({hyb}/5) stays the default for its keyword + semantic robustness across query types.")
+        parts = [lead]
         if d_row:
             parts.append(
                 f" The single top cell was <b>{best['embedding']} + {best['strategy']}</b> "
