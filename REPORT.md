@@ -99,11 +99,28 @@ runs without re‑indexing or models clobbering each other.
 
 ### 3.3 Retrieval strategies (`src/retrievers.py`)
 
+Seven strategies are implemented and benchmarked (all defined in
+`config.STRATEGY_REGISTRY`, the single source of truth shared by the dispatcher,
+the API and the UI):
+
 1. **dense** — cosine similarity over the Chroma vectors.
 2. **hybrid** — dense **+ BM25** keyword search fused with an `EnsembleRetriever`
    (equal weights / reciprocal‑rank fusion).
 3. **hybrid_rerank** — hybrid candidates re‑scored by an open‑source
    **cross‑encoder reranker** (`BAAI/bge‑reranker‑base`) and trimmed to the top‑3.
+4. **mmr** — Max‑Marginal‑Relevance over the dense store: relevant *and* diverse,
+   trimming near‑duplicate chunks. No extra LLM call.
+5. **multi_query** — an LLM expands the question into several paraphrases,
+   hybrid‑retrieves each, and fuses the results (better recall; +1 LLM call).
+6. **hyde** — embed an LLM‑drafted *hypothetical answer* and retrieve against it,
+   helping when the question's wording is far from the paper's (+1 LLM call).
+7. **adaptive_hybrid** *(our own)* — reads the query's shape (acronym / short /
+   quoted → lean BM25; long / conceptual → lean dense), sets the weights
+   accordingly, then applies MMR for diversity. Pure heuristic — no LLM call.
+
+A pre‑RAG **query gate** (`src/crag.py`) can additionally auto‑route to the best
+strategy per question (the `auto` mode), or ask a clarifying question when the
+prompt is too vague to retrieve for.
 
 ### 3.4 Source attribution (`src/rag.py`)
 
@@ -121,7 +138,7 @@ surface and is deployed live (see §9). Six surfaces:
 |---|---|---|
 | **Criteria** | `/api/criteria`, `/api/evaluation` | Live rubric (10/10 goals) + the real eval results table |
 | **Corpus** | `/api/corpus`, `/api/upload`, `/api/reset` | Doc list; **upload a PDF live** → chunk → embed → index → queryable instantly |
-| **Inspector** | `/api/inspect` (`src/inspect.py`) | Dense / BM25 / hybrid / reranked side‑by‑side with scores; visualizes the reranker reordering |
+| **Inspector** | `/api/inspect_strategies`, `/api/inspect` (`src/inspect.py`) | All 7 strategies side‑by‑side, **and** the pipeline internals (dense / BM25 / hybrid / reranked) with scores; visualizes the reranker reordering |
 | **Stack** | `/api/info` | Every model in use (LLM, 3 embeddings, reranker, Chroma, BM25, DuckDuckGo, LangGraph) |
 | **Code** | `/api/source[/file]` | In‑app source browser — allowlisted, path‑traversal‑safe, never serves `.env` |
 | **Chat** (docked) | `/api/ask`, `/api/config` | RAG answers + sources + web‑search badge; runtime embedding/strategy switching |
@@ -139,8 +156,9 @@ blocking pipeline runs in worker threads.
 - ✅ **Dataset / load + index** — 6 arXiv papers → 938 chunks → Chroma.
 - ✅ **Compare embeddings (open‑source + commercial)** — minilm, bge (HF) **and**
   Gemini (commercial). See §5.
-- ✅ **Compare retrieval strategies (cosine → hybrid → reranker)** — dense, hybrid,
-  hybrid_rerank. See §5.
+- ✅ **Compare retrieval strategies (cosine → hybrid → reranker)** — seven in all:
+  dense, hybrid, hybrid_rerank, mmr, multi_query, hyde, and our own adaptive_hybrid.
+  See §5.
 - ✅ **Vector DB ↔ LLM RAG pipeline** — `src/rag.py` over the local Claude backend.
 - ✅ **Test on sample queries** — see §6.
 - ✅ **Show the source (top‑3)** — title + page on every answer.
@@ -168,46 +186,69 @@ signals:
 - **answer quality** — an **LLM‑as‑judge** rates relevance + factual grounding 1–5;
 - **latency** — wall‑clock seconds for retrieval + generation.
 
-Run over **3 embeddings × 3 strategies × 5 sample queries = 45 combinations**
-(90 LLM calls). Full per‑query log and `storage/eval_results.csv` are produced
-by the script.
+Run over **3 embeddings × 7 strategies × 5 sample queries = 105 combinations**.
+Each cell is at least two LLM calls (answer + judge); `multi_query` and `hyde`
+add one more for query expansion. `evaluate.py` is crash‑safe (a transient
+`claude` error skips that one query, never the whole grid) and writes
+`storage/eval_results.csv` incrementally. Reproduce with `python evaluate.py`
+(all 7 strategies by default).
 
-### 5.2 Results (ranked)
+### 5.2 Results
+
+**Average score per strategy** (across the three embeddings) — the headline
+comparison:
+
+| Strategy | Avg score (/5) |
+|---|---|
+| **dense** | **4.67** |
+| **hybrid** | **4.67** |
+| adaptive_hybrid *(our own)* | 4.55 |
+| mmr | 4.53 |
+| hyde | 4.40 |
+| hybrid_rerank | 4.20 |
+| multi_query | 4.00 |
+
+**Top individual cells** (best of the 21):
 
 | Rank | Embedding | Strategy | Avg score (/5) | Avg latency (s) |
 |---|---|---|---|---|
-| 🥇 | **bge** | **hybrid** | **4.8** | **8.76** |
-| 🥈 | minilm | hybrid | 4.8 | 9.51 |
-| 🥉 | gemini | hybrid | 4.8 | 9.71 |
-| 4 | bge | dense | 4.6 | 9.86 |
-| 5 | gemini | dense | 4.6 | 9.89 |
-| 6 | minilm | dense | 4.6 | 10.24 |
-| 7 | gemini | hybrid_rerank | 4.0 | 11.66 |
-| 8 | bge | hybrid_rerank | 4.0 | 11.71 |
-| 9 | minilm | hybrid_rerank | 3.6 | 13.29 |
+| 🥇 | gemini | dense | 5.0 | 8.93 |
+| 🥈 | bge | mmr | 4.8 | 9.78 |
+| 🥉 | **bge** | **hybrid** | **4.8** | **10.89** |
+| 4 | bge | adaptive_hybrid | 4.8 | 15.76 |
+| 5 | gemini | hyde | 4.8 | 17.97 |
+
+*(One of the 105 runs — gemini × adaptive_hybrid — hit a transient `claude`
+error on one query; that cell is averaged over the 4 that completed. Full grid in
+`storage/eval_results.csv`.)*
 
 ### 5.3 Findings
 
-1. **Strategy matters more than the embedding model here.** Every `hybrid` run
-   scored 4.8 and every `dense` run scored 4.6, regardless of embedding. On a
-   clean, high‑signal 6‑paper corpus the three embeddings are effectively tied.
-2. **Hybrid (dense + BM25) is the sweet spot.** Keyword matching complements
-   semantic search for the exact technical terms papers are full of (e.g. "BM25",
-   "positional encoding", "MLM"), lifting dense 4.6 → 4.8.
-3. **The reranker *hurt* on this corpus.** `hybrid_rerank` occupies the bottom
-   three places and is slowest. Compressing to the top‑3 occasionally dropped the
-   chunk the answer needed (the positional‑encoding query fell to 2/5).
-   **Takeaway:** cross‑encoder reranking pays off on large/noisy corpora, but on a
-   small high‑signal one it reduces recall for no quality gain.
-4. **Open‑source matched commercial.** `bge` equalled the commercial Gemini
-   embedding point‑for‑point while running locally and free — so the open‑source
-   choice is justified on both quality and cost.
+1. **Simple retrieval leads; the heavyweight strategies don't help here.** `dense`
+   and `hybrid` tie for the top average (4.67/5). The advanced strategies all
+   scored *lower*: `hyde` 4.40, `hybrid_rerank` 4.20, `multi_query` 4.00. On a
+   small, high‑signal 6‑paper corpus they trim or dilute the context the answer
+   needs (and add latency). **Takeaway:** reranking / query‑expansion / HyDE earn
+   their keep on large, noisy corpora — not on a clean one this size.
+2. **Hybrid stays the default even though dense ties it.** Pure dense matched
+   hybrid on these five (semantically rich) queries, but hybrid *also* catches
+   exact keywords and acronyms ("BM25", "MLM", "NSP", "GPT‑3") via BM25, so it is
+   the more robust choice across query types — for no measurable cost.
+3. **Our `adaptive_hybrid` is the best of the advanced strategies** (4.55/5, 3rd
+   overall) — query‑shape‑aware BM25↔dense weighting beat the two LLM‑powered
+   strategies (`multi_query`, `hyde`) while making **no extra LLM call**.
+4. **Open‑source matched commercial.** The single best cell used the commercial
+   Gemini embedding (`gemini + dense`, 5.0/5), but open‑source `bge` tied the top
+   strategy average while running locally and free — so `bge` is the live default
+   on both quality and cost grounds.
 
 ### 5.4 Final configuration
 
 ```
-DEFAULT_EMBEDDING = bge       # open-source, top score, lowest latency
-DEFAULT_STRATEGY  = hybrid    # dense + BM25; beats both dense and reranker here
+DEFAULT_EMBEDDING = bge       # open-source, ties the top score, runs free on CPU
+DEFAULT_STRATEGY  = hybrid    # dense + BM25; ties dense on quality and is more
+                              # robust (keyword + semantic). "auto" routing also
+                              # available via the pre-RAG query gate.
 LLM_BACKEND       = claude_cli
 ```
 

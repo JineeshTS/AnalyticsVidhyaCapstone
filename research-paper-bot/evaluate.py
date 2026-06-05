@@ -56,28 +56,57 @@ def judge(question: str, answer: str) -> int:
     return int(digits[0]) if digits else 0
 
 
-def run(embeddings, strategies):
+FIELDS = ["embedding", "strategy", "avg_score", "avg_latency_s"]
+
+
+def _write_csv(path, rows):
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def run(embeddings, strategies, out_path=None):
+    """Score every (embedding × strategy) over the sample queries.
+
+    Crash-safe: a per-query or per-cell failure is skipped (not fatal), and results
+    are written incrementally so a transient `claude` error never loses the whole
+    grid (important now that the grid is 7 strategies = many more LLM calls).
+    """
     rows = []
     for emb in embeddings:
         for strat in strategies:
             print(f"\n--- Embedding={emb} | Strategy={strat} ---")
-            retriever = get_retriever(strat, emb)
+            try:
+                retriever = get_retriever(strat, emb)
+            except Exception as e:
+                print(f"  retriever build failed: {str(e)[:80]}")
+                rows.append({"embedding": emb, "strategy": strat, "avg_score": 0, "avg_latency_s": 0})
+                if out_path:
+                    _write_csv(out_path, rows)
+                continue
             latencies, scores = [], []
             for q in SAMPLE_QUERIES:
-                t0 = time.perf_counter()
-                result = answer_question(q, retriever=retriever)
-                latencies.append(time.perf_counter() - t0)
-                score = judge(q, result["answer"])
-                scores.append(score)
-                print(f"  [{score}/5, {latencies[-1]:.2f}s] {q[:50]}...")
+                try:
+                    t0 = time.perf_counter()
+                    result = answer_question(q, retriever=retriever)
+                    dt = time.perf_counter() - t0
+                    score = judge(q, result["answer"])
+                    latencies.append(dt)
+                    scores.append(score)
+                    print(f"  [{score}/5, {dt:.2f}s] {q[:50]}...")
+                except Exception as e:  # transient LLM error — skip this query, keep going
+                    print(f"  [skipped: {str(e)[:60]}] {q[:50]}...")
             rows.append(
                 {
                     "embedding": emb,
                     "strategy": strat,
-                    "avg_score": round(mean(scores), 2),
-                    "avg_latency_s": round(mean(latencies), 2),
+                    "avg_score": round(mean(scores), 2) if scores else 0,
+                    "avg_latency_s": round(mean(latencies), 2) if latencies else 0,
                 }
             )
+            if out_path:  # incremental — survive a later crash
+                _write_csv(out_path, rows)
     return rows
 
 
@@ -85,17 +114,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--embeddings", nargs="+", default=["minilm", "bge", "gemini"],
                         choices=list(config.EMBEDDING_MODELS))
-    parser.add_argument("--strategies", nargs="+",
-                        default=["dense", "hybrid", "hybrid_rerank"])
+    parser.add_argument("--strategies", nargs="+", default=config.STRATEGY_NAMES,
+                        choices=config.STRATEGY_NAMES)
     args = parser.parse_args()
 
-    rows = run(args.embeddings, args.strategies)
-
     out = config.STORAGE_DIR / "eval_results.csv"
-    with open(out, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
-        writer.writeheader()
-        writer.writerows(rows)
+    rows = run(args.embeddings, args.strategies, out_path=out)
+    if rows:
+        _write_csv(out, rows)
 
     print("\n========== RESULTS ==========")
     print(f"{'embedding':<10}{'strategy':<16}{'avg_score':<12}{'avg_latency_s'}")
