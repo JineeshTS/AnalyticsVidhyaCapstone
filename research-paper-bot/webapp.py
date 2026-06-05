@@ -21,6 +21,7 @@ Run locally:  uvicorn webapp:app --host 127.0.0.1 --port 8011
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -634,14 +635,33 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
                         continue
                     pages = len({c.metadata.get("page_number") for c in chunks})
                     emb_status = []
+                    failed_embeddings = []
                     for name in config.EMBEDDING_MODELS:
                         if not has_vectorstore(name):
                             continue
-                        try:
-                            add_to_vectorstore(chunks, name)
-                            emb_status.append({"name": name, "label": config.EMBEDDING_MODELS[name]["label"], "status": "indexed"})
-                        except Exception as e:  # e.g. gemini quota — keep the local ones
-                            emb_status.append({"name": name, "label": config.EMBEDDING_MODELS[name]["label"], "status": f"error: {str(e)[:80]}"})
+                        spec = config.EMBEDDING_MODELS[name]
+                        label = spec["label"]
+                        # Optionally skip commercial embeddings so a quota failure can't half-index a doc.
+                        if config.UPLOAD_SKIP_COMMERCIAL and spec["provider"] in ("gemini", "openai"):
+                            emb_status.append({"name": name, "label": label, "status": "skipped"})
+                            continue
+                        # add_documents is all-or-nothing per (doc, embedding) — it embeds all
+                        # chunks before adding — so retrying can't create duplicates.
+                        err = None
+                        for attempt in range(config.UPLOAD_EMBED_RETRIES + 1):
+                            try:
+                                add_to_vectorstore(chunks, name)
+                                err = None
+                                break
+                            except Exception as e:  # e.g. gemini rate-limit/quota
+                                err = str(e)
+                                if attempt < config.UPLOAD_EMBED_RETRIES:
+                                    time.sleep(2 * (attempt + 1))
+                        if err is None:
+                            emb_status.append({"name": name, "label": label, "status": "indexed"})
+                        else:
+                            emb_status.append({"name": name, "label": label, "status": f"error: {err[:80]}"})
+                            failed_embeddings.append(name)
                     sample = chunks[len(chunks) // 2] if chunks else None
                     out.append({
                         "filename": safe,
@@ -654,6 +674,7 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
                             "text": (sample.page_content[:400].strip() if sample else ""),
                         } if sample else None,
                         "embeddings": emb_status,
+                        "failed_embeddings": failed_embeddings,
                     })
                 _rebuild_state()  # one rebuild for the whole batch → single atomic swap
                 return out
@@ -661,10 +682,17 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
 
     docs = _doc_summary(_state["corpus"])
     ingested = [r for r in results if r.get("ok")]
+    # Loud, per-embedding warnings — so a quota failure isn't a silent ⚠.
+    warnings = []
+    for r in ingested:
+        for name in r.get("failed_embeddings", []):
+            warnings.append(f"“{r['title']}” was NOT indexed into the {name} embedding "
+                            f"(likely a free-tier quota limit) — it won't appear when that embedding is selected.")
     return {
         "results": results,
         "ingested": len(ingested),
         "failed": len(results) - len(ingested),
+        "warnings": warnings,
         "total_docs": len(docs),
         "total_chunks": sum(d["chunks"] for d in docs),
     }

@@ -147,6 +147,16 @@ STRATEGY_NAMES = list(STRATEGY_REGISTRY.keys())
 GRADE_CONCURRENCY = int(os.getenv("GRADE_CONCURRENCY", "8"))
 
 # ---------------------------------------------------------------------------
+# Live-upload indexing robustness
+# ---------------------------------------------------------------------------
+# Extra attempts when indexing an uploaded doc into an embedding (commercial
+# embeddings like Gemini can rate-limit on big/batched uploads).
+UPLOAD_EMBED_RETRIES = int(os.getenv("UPLOAD_EMBED_RETRIES", "2"))
+# Skip commercial embeddings (gemini/openai) on live upload so a doc is never
+# half-indexed by a quota failure. Off by default (index everywhere, retry+warn).
+UPLOAD_SKIP_COMMERCIAL = os.getenv("UPLOAD_SKIP_COMMERCIAL", "false").lower() == "true"
+
+# ---------------------------------------------------------------------------
 # Web search (Corrective RAG fallback)
 # ---------------------------------------------------------------------------
 WEB_SEARCH_RESULTS = int(os.getenv("WEB_SEARCH_RESULTS", "3"))

@@ -196,6 +196,9 @@
   .step{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px;color:var(--muted)}
   .step .ico{width:18px;text-align:center}.step.done{color:var(--text)}.step.run{color:var(--accent)}
   .chunkprev{margin-top:9px;background:var(--panel3);border:1px solid var(--line);border-radius:8px;padding:11px;font-size:12px;color:var(--muted);font-family:ui-monospace,Menlo,monospace;line-height:1.5}
+  .upwarn{margin-top:11px;background:#2a1f12;border:1px solid #5a4a1f;border-radius:9px;padding:11px 13px;font-size:12px;color:#fbd38d;line-height:1.5}
+  .upwarn ul{margin:5px 0 0;padding-left:18px}.upwarn li{margin:3px 0}
+  .upwarnsub{margin-top:7px;color:var(--muted);font-size:11.5px}
   /* inspector */
   .cols{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
   .col{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px;min-height:120px}
@@ -689,6 +692,7 @@ async function doUpload(fileList){
       }
     });
     h+=stepHtml([{ico:'🎉',cls:'done',txt:'Done — <b>'+d.ingested+'</b> added'+(d.failed?(', <b>'+d.failed+'</b> failed'):'')+'. Corpus now '+d.total_docs+' docs / '+d.total_chunks+' chunks. Ask about them in Chat.'}]);
+    if(d.warnings&&d.warnings.length){h+='<div class="upwarn"><b>⚠ Heads-up:</b><ul>'+d.warnings.map(w=>'<li>'+esc(w)+'</li>').join('')+'</ul><div class="upwarnsub">Tip: use the <b>BGE</b> embedding (the default) — it has every document. Only the commercial Gemini embedding hit a quota.</div></div>';}
     box.innerHTML=h+prev;loadCorpus();
   }catch(e){box.innerHTML='<div class="step"><span class="err">Network error</span></div>';}
 }
