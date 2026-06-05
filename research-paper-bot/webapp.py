@@ -107,7 +107,10 @@ def _rebuild_state():
     clear_retriever_cache()   # corpus may have changed → drop stale (BM25-backed) retrievers
     corpus = build_corpus()
     _state["corpus"] = corpus
-    _state["original_sources"] = _state.get("original_sources") or {d.metadata.get("source") for d in corpus}
+    # "Original" = the canonical seminal papers, NOT a snapshot of whatever was in
+    # data/ at startup — so the "uploaded" badge and "Reset to original" stay truthful
+    # even if extra PDFs are present when the service boots.
+    _state["original_sources"] = config.ORIGINAL_SOURCES
     _state["crag_app"] = build_crag_app(
         strategy=_state["strategy"], embedding_name=_state["embedding"]
     )
@@ -496,6 +499,8 @@ def corpus() -> dict:
         "documents": docs,
         "total_docs": len(docs),
         "total_chunks": sum(d["chunks"] for d in docs),
+        "original_count": len(config.ORIGINAL_SOURCES),
+        "uploaded_count": sum(1 for d in docs if d["uploaded"]),
         "config": {"embedding": _state["embedding"], "strategy": _state["strategy"]},
         "options": {"embeddings": embeddings, "strategies": STRATEGIES,
                     "strategy_registry": config.STRATEGY_REGISTRY, "auto_available": True},

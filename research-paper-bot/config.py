@@ -101,6 +101,14 @@ def display_title(source: str, fallback: str = "") -> str:
     """Nice presentation title for a source filename; falls back for uploads."""
     return PAPER_TITLES.get(source, fallback or source or "Unknown")
 
+
+# The canonical "original" corpus — the seminal papers shipped with the project.
+# "Reset to original" restores exactly these; anything else in data/ (live uploads,
+# duplicates) is treated as added and removed on reset. This is the single source
+# of truth for what counts as original, so it never drifts with whatever happens
+# to be sitting in data/ at startup.
+ORIGINAL_SOURCES = set(PAPER_TITLES.keys())
+
 # Cross-encoder reranker (open-source, runs on CPU).
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
 

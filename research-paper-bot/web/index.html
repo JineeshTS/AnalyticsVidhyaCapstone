@@ -337,7 +337,7 @@
       <div class="steps" id="steps"></div>
       <div class="row" style="margin-top:18px"><h2 style="margin:0">Indexed documents</h2>
         <span class="sub" id="corpusTotals" style="margin:0 auto 0 8px"></span>
-        <button class="btn" onclick="resetCorpus()">↺ Reset to original 6</button></div>
+        <button class="btn" id="resetBtn" onclick="resetCorpus()">↺ Reset to original</button></div>
       <div class="doclist" id="doclist"></div>
     </div></section>
 
@@ -641,6 +641,8 @@ async function loadCorpus(){
   const d=await (await fetch('/api/corpus')).json();
   $('#corpusTotals').textContent=d.total_docs+' docs · '+d.total_chunks+' chunks';
   $('#mCorpus').textContent=d.total_docs+' docs · '+d.total_chunks+' chunks';
+  window.__origCount=d.original_count;window.__upCount=d.uploaded_count;
+  const rb=$('#resetBtn');if(rb){rb.textContent='↺ Reset to original '+(d.original_count||'')+(d.uploaded_count?(' ('+d.uploaded_count+' added)'):'');rb.style.display=d.uploaded_count?'':'none';}
   $('#doclist').innerHTML=d.documents.map(x=>
     `<div class="doc ${x.uploaded?'new':''}" onclick="toggleChunks('${encodeURIComponent(x.source)}',this)">`+
     `<span class="chev">▸</span><span class="ttl">${esc(x.title)}</span>`+
@@ -697,7 +699,8 @@ async function doUpload(fileList){
   }catch(e){box.innerHTML='<div class="step"><span class="err">Network error</span></div>';}
 }
 async function resetCorpus(){
-  if(!confirm('Remove all uploaded PDFs and restore the original 6 papers?'))return;
+  const n=window.__origCount||6,up=window.__upCount||0;
+  if(!confirm('Remove the '+up+' added PDF(s) and restore the original '+n+' seminal papers?'))return;
   const d=await (await fetch('/api/reset',{method:'POST'})).json();
   loadCorpus();$('#steps').classList.remove('show');
   alert('Removed '+(d.removed?d.removed.length:0)+' uploaded doc(s).');
