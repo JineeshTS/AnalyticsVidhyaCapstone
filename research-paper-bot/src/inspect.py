@@ -102,3 +102,36 @@ def inspect_query(
             "reranked": reranked,
         },
     }
+
+
+def inspect_strategies(query: str, embedding_name: str = None, k: int = 6) -> Dict:
+    """Run EVERY registered retrieval strategy for `query` and return each one's
+    top results side-by-side — so all 7 strategies are visible, not just the
+    internal dense/bm25/hybrid/reranked stages.
+
+    Uses the CRAG retriever cache so repeated inspects don't rebuild retrievers.
+    Note: multi_query and hyde each make one LLM call.
+    """
+    from src.crag import _get_cached_retriever
+
+    embedding_name = embedding_name or config.DEFAULT_EMBEDDING
+    out = {}
+    for name in config.STRATEGY_NAMES:
+        meta = config.STRATEGY_REGISTRY.get(name, {})
+        entry = {"label": meta.get("label", name), "blurb": meta.get("blurb", ""),
+                 "cost": meta.get("cost", ""), "llm_calls": meta.get("llm_calls", 0)}
+        try:
+            docs = _get_cached_retriever(name, embedding_name).invoke(query)
+            items = []
+            for i, d in enumerate(docs[:k]):
+                score = d.metadata.get("relevance_score", d.metadata.get("score"))
+                items.append(_item(d, i + 1, score))
+            entry["count"] = len(docs)
+            entry["items"] = items
+        except Exception as e:  # never let one strategy break the whole view
+            entry["error"] = f"{type(e).__name__}: {str(e)[:120]}"
+            entry["items"] = []
+        out[name] = entry
+
+    return {"query": query, "embedding": embedding_name,
+            "order": config.STRATEGY_NAMES, "strategies": out}

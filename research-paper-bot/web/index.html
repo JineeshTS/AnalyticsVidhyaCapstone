@@ -341,7 +341,7 @@
     <!-- INSPECTOR -->
     <section class="tab" id="tab-inspect"><div class="wrap">
       <h2>Retrieval Inspector</h2>
-      <p class="sub">See <i>how</i> the system finds context for a question — before any answer is written. Type a question, then either <b>Inspect strategies</b> (one embedding: dense → BM25 → hybrid → reranked, side by side) or <b>Compare embeddings</b> (the same question through every embedding). Each card (📄) is a <b>chunk from one of the indexed papers</b> — so the most on-topic paper dominates (e.g. a "few-shot learning" query returns the <i>GPT-3 paper</i>, which is titled "Language Models are Few-Shot Learners").</p>
+      <p class="sub">See <i>how</i> the system finds context for a question — before any answer is written. Type a question, then: <b>Compare all 7 strategies</b> (dense · hybrid · rerank · MMR · multi-query · HyDE · adaptive — side by side; Multi-Query &amp; HyDE call the LLM, so ~10–20s); <b>Pipeline internals</b> (how the hybrid+rerank path is built: dense → BM25 → hybrid → reranked); or <b>Compare embeddings</b> (the same question through every embedding). Each card (📄) is a <b>chunk from one of the indexed papers</b>.</p>
       <div style="font-size:13px;font-weight:600;margin:0 0 5px">① Type a question to retrieve for</div>
       <input id="iq" class="txt" value="What problem do positional encodings solve?" placeholder="Type any question about the papers…" style="width:100%" />
       <div class="chips" style="margin-top:7px">
@@ -352,7 +352,8 @@
       <div style="font-size:13px;font-weight:600;margin:14px 0 5px">② Run it</div>
       <div class="row">
         <label class="sub" style="margin:0">Embedding <select id="iEmb"></select></label>
-        <button class="primary" id="iBtn" onclick="runInspect()">🔍 Inspect strategies</button>
+        <button class="primary" id="siBtn" onclick="runStrategies()">🧭 Compare all 7 strategies</button>
+        <button class="btn" id="iBtn" onclick="runInspect()">🔬 Pipeline internals</button>
         <button class="btn" id="ceBtn" onclick="runCompare()">⇄ Compare embeddings</button></div>
       <div class="cols" id="icols"><p class="sub" style="margin-top:16px">↑ Type a question and click a button — the retrieved chunks (with relevance scores) will appear here in columns.</p></div>
     </div></section>
@@ -700,7 +701,26 @@ async function resetCorpus(){
 
 // inspector
 function setIq(t){$('#iq').value=t;$('#iq').focus();}
-$('#iq').addEventListener('keydown',e=>{if(e.key==='Enter')runInspect();});
+$('#iq').addEventListener('keydown',e=>{if(e.key==='Enter')runStrategies();});
+async function runStrategies(){
+  const q=$('#iq').value.trim();if(!q)return;const cols=$('#icols');$('#siBtn').disabled=true;
+  cols.innerHTML='<p class="sub" style="margin-top:16px">Running all 7 strategies… <i>Multi-Query &amp; HyDE call the LLM, so this takes ~10–20s.</i></p>';
+  try{
+    const d=await (await fetch('/api/inspect_strategies',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({query:q,embedding:$('#iEmb').value})})).json();
+    if(d.error){cols.innerHTML='<p class="err">'+esc(d.error)+'</p>';return;}
+    cols.innerHTML='';
+    (d.order||[]).forEach(name=>{
+      const s=d.strategies[name];const c=document.createElement('div');c.className='col';
+      const costTag=s.cost?`<span class="tag ${s.llm_calls?'com':'os'}">${esc(s.cost)}${s.llm_calls?' · LLM':''}</span>`:'';
+      let inner=`<h3>${esc(s.label||name)} ${costTag}</h3><div class="desc">${esc(s.blurb||'')}</div>`;
+      if(s.error){inner+=`<div class="cand"><span class="err">${esc(s.error)}</span></div>`;}
+      else if(!s.items||!s.items.length){inner+='<div class="cand"><span class="sn">no chunks</span></div>';}
+      else inner+=s.items.map(it=>`<div class="cand"><div class="h"><span class="nm">#${it.rank} 📄 ${esc(it.title)}</span><span class="sc">${it.score!=null?it.score:'—'}</span></div><div class="pg">page ${esc(it.page)}</div><div class="sn">${esc(it.snippet)}</div></div>`).join('');
+      c.innerHTML=inner;cols.appendChild(c);
+    });
+  }catch(e){cols.innerHTML='<p class="err">Network error</p>';}finally{$('#siBtn').disabled=false;}
+}
 const SD={dense:'Semantic match — by meaning (embedding similarity). Higher = closer.',
   bm25:'Keyword match — by exact words (BM25). Higher = stronger keyword overlap.',
   hybrid:'Both combined — semantic + keyword fused (RRF).',

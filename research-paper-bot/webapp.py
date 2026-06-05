@@ -695,6 +695,24 @@ async def inspect(req: InspectRequest) -> dict:
             return JSONResponse({"error": f"Inspect failed: {e}"}, status_code=502)
 
 
+@app.post("/api/inspect_strategies")
+async def inspect_strategies_ep(req: InspectRequest) -> dict:
+    """Run all 7 retrieval strategies for one query, side-by-side (multi_query and
+    hyde each make an LLM call, so this is slower than /api/inspect)."""
+    query = (req.query or "").strip()
+    if not query:
+        return JSONResponse({"error": "Empty query."}, status_code=400)
+    emb = req.embedding or _state["embedding"]
+    if emb not in config.EMBEDDING_MODELS or not has_vectorstore(emb):
+        return JSONResponse({"error": f"No index for '{emb}'."}, status_code=400)
+    from src.inspect import inspect_strategies
+    async with _semaphore:
+        try:
+            return await asyncio.to_thread(inspect_strategies, query, emb)
+        except Exception as e:
+            return JSONResponse({"error": f"Inspect failed: {e}"}, status_code=502)
+
+
 @app.post("/api/compare_embeddings")
 async def compare_embeddings(req: InspectRequest) -> dict:
     """Run the SAME query through each built embedding (dense retrieval) so the
