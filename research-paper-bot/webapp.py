@@ -143,7 +143,10 @@ class ConfigRequest(BaseModel):
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    # no-cache so the browser always revalidates (ETag → fast 304 when unchanged)
+    # and never serves a stale UI — e.g. a cached page missing newer features.
+    return FileResponse(STATIC_DIR / "index.html",
+                        headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
 @app.get("/api/health")

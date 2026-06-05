@@ -670,11 +670,13 @@ async function doUpload(fileList){
   const names=files.map(f=>esc(f.name)).join(', ');
   const plural=files.length>1?'s':'';
   box.innerHTML=stepHtml([{ico:'⏳',cls:'run',txt:'Uploading <b>'+files.length+' file'+plural+'</b> ('+names+') & parsing pages…'},
-    {ico:'•',cls:'',txt:'Chunking (1000/150)'},{ico:'•',cls:'',txt:'Embedding + indexing into Chroma'}]);
+    {ico:'•',cls:'',txt:'Chunking (1000/150)'},{ico:'•',cls:'',txt:'Embedding + indexing into every model (MiniLM · BGE · Gemini)'},
+    {ico:'⏱️',cls:'',txt:'<i>This can take ~30–90s for several real papers — please keep this tab open.</i>'}]);
   try{
     const fd=new FormData();files.forEach(f=>fd.append('files',f));
-    const res=await fetch('/api/upload',{method:'POST',body:fd});const d=await res.json();
-    if(!res.ok){box.innerHTML='<div class="step"><span class="err">✕ '+esc((d&&d.error)||'Upload failed')+'</span></div>';return;}
+    const res=await fetch('/api/upload',{method:'POST',body:fd});
+    let d; try{d=await res.json();}catch(_){d={};}
+    if(!res.ok){box.innerHTML='<div class="step"><span class="err">✕ '+esc((d&&d.error)||('Upload failed (HTTP '+res.status+')'))+'</span></div>';return;}
     let h='',prev='';
     (d.results||[]).forEach(r=>{
       if(r.ok){
