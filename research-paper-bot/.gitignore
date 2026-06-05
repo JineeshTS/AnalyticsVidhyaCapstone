@@ -13,6 +13,7 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Chainlit
-.chainlit/
+# Chainlit — ignore runtime state but keep the committed UI config
+.chainlit/*
+!.chainlit/config.toml
 .files/

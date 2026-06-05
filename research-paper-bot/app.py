@@ -35,6 +35,22 @@ CONDENSE_PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
+@cl.set_starters
+async def starters():
+    # One-click example questions on the welcome screen — covers in-corpus,
+    # conversational, and out-of-corpus (web-fallback) paths for evaluators.
+    return [
+        cl.Starter(label="What is self-attention?",
+                   message="What is the self-attention mechanism and why is it useful?"),
+        cl.Starter(label="How does BERT pre-train?",
+                   message="How does BERT's masked language modelling pre-training work?"),
+        cl.Starter(label="What problem does RAG solve?",
+                   message="What problem does retrieval-augmented generation solve?"),
+        cl.Starter(label="What is Mamba (2023)?  (web fallback)",
+                   message="What is the Mamba state-space model from 2023?"),
+    ]
+
+
 @cl.on_chat_start
 async def on_chat_start():
     session_id = str(uuid.uuid4())
@@ -99,13 +115,15 @@ async def on_message(message: cl.Message):
     memory.add_message(session_id, "user", message.content)
     memory.add_message(session_id, "assistant", answer)
 
-    # 4. Build source elements (top 3).
+    # 4. Build source elements (top 3) — use the clean cited title (e.g.
+    #    "Attention Is All You Need (Vaswani et al., 2017)") for parity with the
+    #    main app, not the raw PDF metadata title.
     elements = []
     seen = set()
     for d in docs:
-        title = d.metadata.get("title", "Unknown")
-        page = d.metadata.get("page_number", "?")
         src = d.metadata.get("source", "")
+        title = config.display_title(src, d.metadata.get("title", "Unknown"))
+        page = d.metadata.get("page_number", "?")
         key = (title, page)
         if key in seen:
             continue
