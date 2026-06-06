@@ -62,12 +62,15 @@ Built for the **Analytics Vidhya Generative AI Pinnacle** capstone. It covers
 
 ```
 research-paper-bot/
-├── config.py              # all settings (models, paths, chunking, retrieval)
+├── config.py              # all settings + STRATEGY_REGISTRY (7 strategies)
 ├── build_index.py         # CLI: ingest PDFs → embed → persist Chroma
-├── evaluate.py            # benchmark embeddings × strategies, pick a winner
-├── app.py                 # Chainlit conversational UI (entry point)
+├── evaluate.py            # benchmark embeddings × 7 strategies, pick a winner
+├── webapp.py              # FastAPI RAG Explorer (primary web UI)
+├── web/index.html         # the explorer UI (single page)
+├── app.py                 # Chainlit conversational UI (second interface, /chat)
+├── chainlit.md            # Chainlit welcome screen (capstone-branded)
 ├── requirements.txt
-├── .env.example           # copy to .env and add your OpenAI key
+├── .env.example           # copy to .env (defaults work; GEMINI_API_KEY optional)
 ├── data/                  # put research-paper PDFs here
 ├── storage/               # generated: Chroma DBs + chat_memory.db (git-ignored)
 ├── scripts/
@@ -79,10 +82,11 @@ research-paper-bot/
     ├── ingest.py          # load + chunk PDFs, attach title/page metadata
     ├── embeddings.py      # embedding factory (HF + OpenAI)
     ├── vectorstore.py     # Chroma build/load (one collection per embedding)
-    ├── retrievers.py      # dense | hybrid | hybrid_rerank
+    ├── retrievers.py      # 7 strategies (dense…hyde, adaptive_hybrid) + registry
     ├── rag.py             # basic RAG + source attribution
-    ├── crag.py            # Corrective RAG (LangGraph + web-search fallback)
-    ├── websearch.py       # DuckDuckGo wrapper (free, no key)
+    ├── crag.py            # Corrective RAG (LangGraph) + pre-RAG query gate
+    ├── inspect.py         # per-strategy + pipeline-internals views for the Inspector
+    ├── websearch.py       # pluggable web search (ddg default | brave | serper)
     └── memory.py          # multi-user SQLite chat history
 ```
 
@@ -97,9 +101,9 @@ python3 -m venv .venv && source .venv/bin/activate
 # 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Add your key
+# 3. Configure — defaults are fine; generation uses the local `claude` CLI ($0)
 cp .env.example .env
-# edit .env → set OPENAI_API_KEY=sk-...
+# optional: set GEMINI_API_KEY to build/use the commercial `gemini` embedding
 
 # 4. Get papers (either drop your own PDFs in data/, or:)
 python scripts/download_papers.py
@@ -140,22 +144,27 @@ uvicorn webapp:app --host 127.0.0.1 --port 8011      # then open http://127.0.0.
 ```
 
 For a persistent public deployment behind nginx, see `deploy/paperbot.service`
-(systemd) and `deploy/paperbot.nginx.conf` (TLS + Basic-Auth gate + rate limits).
-A live instance runs at **https://paperbot.ganakys.com** (access-gated).
+(systemd) and `deploy/paperbot.nginx.conf` (TLS + rate limits; an optional
+Basic-Auth gate can be re-enabled). A live instance runs at
+**https://paperbot.ganakys.com** (open for evaluation, rate-limited).
 
 ## Compare and choose the best approach
 
 ```bash
 python evaluate.py
-# Runs every embedding × strategy over sample queries, scores answers with an
-# LLM judge, reports latency, prints a ranked table, and writes
-# storage/eval_results.csv. Use this to justify your final choice to the mentor.
+# Runs every embedding × all 7 strategies over 5 sample queries (3×7×5 = 105 runs),
+# scores answers with an LLM judge, reports latency, prints a ranked table, and
+# writes storage/eval_results.csv. Crash-safe + incremental. Justify your choice
+# to the mentor with numbers. (Result: dense ties hybrid at the top; the advanced
+# strategies underperform on this small corpus; our adaptive_hybrid is the best of
+# them. See ../REPORT.md §5.)
 ```
 
 Once you've picked a winner, set it as the default in `.env`:
 ```
-DEFAULT_EMBEDDING=bge          # or openai / minilm
-DEFAULT_STRATEGY=hybrid_rerank # or dense / hybrid
+DEFAULT_EMBEDDING=bge       # minilm / bge / gemini
+DEFAULT_STRATEGY=hybrid     # dense | hybrid | hybrid_rerank | mmr | multi_query | hyde | adaptive_hybrid
+                            # (or pick "auto" in the app to let the query gate route per question)
 ```
 
 ---
@@ -181,9 +190,11 @@ sudo certbot --nginx -d YOUR_DOMAIN   # HTTPS
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `DEFAULT_EMBEDDING` | `bge` | `minilm` / `bge` / `openai` |
-| `DEFAULT_STRATEGY` | `hybrid_rerank` | `dense` / `hybrid` / `hybrid_rerank` |
-| `LLM_MODEL` | `gpt-4o-mini` | Use a stronger model for the final demo |
+| `DEFAULT_EMBEDDING` | `bge` | `minilm` / `bge` / `gemini` |
+| `DEFAULT_STRATEGY` | `hybrid` | one of the 7 strategies (or `auto` in the app) |
+| `CLAUDE_MODEL` | `sonnet` | generation model (local `claude` CLI) |
+| `GATE_MODEL` | `haiku` | fast model for the pre-RAG query gate |
+| `WEB_SEARCH_PROVIDER` | `ddg` | `ddg` / `brave` / `serper` (auto-falls back to ddg) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | 1000 / 150 | Chunking |
 | `TOP_K` | 5 | Candidates fetched per retriever |
 | `TOP_SOURCES` | 3 | Sources shown to the user |
@@ -199,8 +210,10 @@ compiled. Evidence (see `../REPORT.md` §6 for detail):
   (minilm, bge, gemini), all built successfully.
 - **Basic RAG with sources** — grounded answers citing paper title + page
   (e.g. BERT MLM question → BERT pp. 2/16/3).
-- **Embedding × strategy benchmark** — full `evaluate.py` run (45 combos,
-  90 LLM calls); results in `storage/eval_results.csv`. Winner: **bge + hybrid**.
+- **Embedding × strategy benchmark** — full `evaluate.py` run over all 7 strategies
+  (3×7×5 = **105 runs**); results in `storage/eval_results.csv`. `dense` and `hybrid`
+  tie for the top strategy average (4.67/5); live default **bge + hybrid**; our
+  `adaptive_hybrid` is the best of the advanced strategies (4.55).
 - **Corrective RAG** — in-corpus question answers from papers
   (`used_web_search=False`); out-of-corpus "Mamba (2023)" question correctly
   falls back to **live web search** (`used_web_search=True`, web sources returned).
